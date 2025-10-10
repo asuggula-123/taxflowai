@@ -34,12 +34,36 @@ export default function Home() {
     },
   });
 
+  const deleteCustomerMutation = useMutation({
+    mutationFn: async (customerId: string) => {
+      return await apiRequest("DELETE", `/api/customers/${customerId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast({
+        title: "Customer deleted",
+        description: "Customer has been removed successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete customer.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleAddCustomer = (data: { name: string; email: string }) => {
     createCustomerMutation.mutate(data);
   };
 
   const handleCustomerClick = (customer: Customer) => {
     setLocation(`/customer/${customer.id}`);
+  };
+
+  const handleDeleteCustomer = (customerId: string) => {
+    deleteCustomerMutation.mutate(customerId);
   };
 
   if (isLoading) {
@@ -70,7 +94,11 @@ export default function Home() {
           <AddCustomerDialog onAddCustomer={handleAddCustomer} />
         </div>
 
-        <CustomerList customers={customers} onCustomerClick={handleCustomerClick} />
+        <CustomerList 
+          customers={customers} 
+          onCustomerClick={handleCustomerClick}
+          onDeleteCustomer={handleDeleteCustomer}
+        />
       </main>
     </div>
   );

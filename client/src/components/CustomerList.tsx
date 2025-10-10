@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { StatusBadge, CustomerStatus } from "./StatusBadge";
-import { Mail } from "lucide-react";
+import { Mail, Trash2 } from "lucide-react";
 
 export interface Customer {
   id: string;
@@ -12,6 +13,7 @@ export interface Customer {
 interface CustomerListProps {
   customers: Customer[];
   onCustomerClick?: (customer: Customer) => void;
+  onDeleteCustomer?: (customerId: string) => void;
 }
 
 export function CustomerList({ customers, onCustomerClick }: CustomerListProps) {

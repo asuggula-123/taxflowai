@@ -16,6 +16,7 @@ export interface IStorage {
   getCustomer(id: string): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   updateCustomerStatus(id: string, status: string): Promise<Customer | undefined>;
+  deleteCustomer(id: string): Promise<boolean>;
 
   // Document operations
   getDocumentsByCustomer(customerId: string): Promise<Document[]>;
@@ -88,6 +89,31 @@ export class MemStorage implements IStorage {
     const updated = { ...customer, status };
     this.customers.set(id, updated);
     return updated;
+  }
+
+  async deleteCustomer(id: string): Promise<boolean> {
+    const customer = this.customers.get(id);
+    if (!customer) return false;
+
+    // Delete all related data
+    this.customers.delete(id);
+    
+    // Delete all documents for this customer
+    Array.from(this.documents.values())
+      .filter((d) => d.customerId === id)
+      .forEach((d) => this.documents.delete(d.id));
+    
+    // Delete all chat messages for this customer
+    Array.from(this.chatMessages.values())
+      .filter((m) => m.customerId === id)
+      .forEach((m) => this.chatMessages.delete(m.id));
+    
+    // Delete all customer details
+    Array.from(this.customerDetails.values())
+      .filter((d) => d.customerId === id)
+      .forEach((d) => this.customerDetails.delete(d.id));
+
+    return true;
   }
 
   async getDocumentsByCustomer(customerId: string): Promise<Document[]> {
