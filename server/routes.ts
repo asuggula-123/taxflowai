@@ -5,6 +5,7 @@ import multer from "multer";
 import { insertCustomerSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
+import { analyzeDocument, determineNextSteps, generateChatResponse } from "./ai-service";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -84,7 +85,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const uploadedDocs = [];
+      const aiResponses = [];
+
       for (const file of files) {
+        // Create document
         const document = await storage.createDocument({
           customerId: req.params.customerId,
           name: file.originalname,
@@ -92,10 +96,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
           filePath: file.path,
         });
         uploadedDocs.push(document);
+
+        // Analyze document with AI
+        const analysis = await analyzeDocument(file.originalname, req.params.customerId);
+        
+        // Create AI response message
+        const aiMessage = await storage.createChatMessage({
+          customerId: req.params.customerId,
+          sender: "ai",
+          content: analysis.feedback,
+        });
+        aiResponses.push(aiMessage);
+
+        // Mark requested document as completed if it matches
+        const requestedDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+        const matchingRequested = requestedDocs.find(
+          (d) => d.status === "requested" && d.name.toLowerCase().includes(file.originalname.toLowerCase().split('.')[0])
+        );
+        if (matchingRequested) {
+          await storage.updateDocumentStatus(matchingRequested.id, "completed", file.path);
+        }
       }
 
-      res.status(201).json(uploadedDocs);
+      // Determine next steps after all documents are analyzed
+      const nextSteps = await determineNextSteps(req.params.customerId);
+      
+      // Update customer status
+      await storage.updateCustomerStatus(req.params.customerId, nextSteps.customerStatus);
+
+      // Add next steps message if there are missing documents
+      if (nextSteps.missingDocuments.length > 0) {
+        await storage.createChatMessage({
+          customerId: req.params.customerId,
+          sender: "ai",
+          content: nextSteps.message,
+        });
+
+        // Create requested documents
+        for (const docName of nextSteps.missingDocuments.slice(0, 3)) {
+          const existingDoc = uploadedDocs.find((d) => d.name.includes(docName));
+          if (!existingDoc) {
+            await storage.createDocument({
+              customerId: req.params.customerId,
+              name: docName,
+              status: "requested",
+            });
+          }
+        }
+      } else if (nextSteps.isComplete) {
+        await storage.createChatMessage({
+          customerId: req.params.customerId,
+          sender: "ai",
+          content: nextSteps.message,
+        });
+      }
+
+      res.status(201).json({ documents: uploadedDocs, aiResponses });
     } catch (error) {
+      console.error("Upload error:", error);
       res.status(500).json({ error: "Failed to upload documents" });
     }
   });
@@ -116,9 +174,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         customerId: req.params.customerId,
       });
+      
+      // Create accountant message
       const message = await storage.createChatMessage(validatedData);
-      res.status(201).json(message);
+
+      // Generate AI response
+      const aiResponseContent = await generateChatResponse(validatedData.content, req.params.customerId);
+      const aiMessage = await storage.createChatMessage({
+        customerId: req.params.customerId,
+        sender: "ai",
+        content: aiResponseContent,
+      });
+
+      res.status(201).json({ message, aiMessage });
     } catch (error) {
+      console.error("Message error:", error);
       res.status(400).json({ error: "Invalid message data" });
     }
   });
