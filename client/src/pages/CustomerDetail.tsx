@@ -92,6 +92,12 @@ export default function CustomerDetail() {
       if (!response.ok) throw new Error("Upload failed");
       return response.json();
     },
+    onMutate: () => {
+      toast({
+        title: "Uploading documents...",
+        description: "Please wait while we upload and analyze your documents.",
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "messages"] });
@@ -99,8 +105,8 @@ export default function CustomerDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       toast({
-        title: "Documents uploaded",
-        description: "AI is analyzing your documents...",
+        title: "Upload complete",
+        description: "Documents uploaded and analyzed successfully.",
       });
     },
     onError: () => {
@@ -169,6 +175,7 @@ export default function CustomerDetail() {
             messages={messages}
             onSendMessage={handleSendMessage}
             onFileUpload={handleFileUpload}
+            isUploading={uploadFilesMutation.isPending}
           />
           <div ref={messagesEndRef} />
         </div>

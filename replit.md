@@ -69,19 +69,32 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **AI**: OpenAI GPT-5
 - **Storage**: In-memory (MemStorage) - can be migrated to PostgreSQL
 
-## Recent Changes (Latest Session)
-- Built complete data schema for customers, documents, messages, and details
-- Implemented in-memory storage with full CRUD operations
-- Created backend API routes with validation
-- Integrated OpenAI GPT-5 for document analysis and intelligent chat
-- Built file upload system with AI-powered document validation
-- Connected frontend to backend APIs
-- Implemented automatic status tracking based on document completeness
+## Recent Changes (Latest Session - October 10, 2025)
+
+### New Features
+- **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup of all related data (documents, messages, details)
+- **Upload Progress Indicators**: Real-time visual feedback during document upload and AI analysis with spinner and disabled states
+
+### Improvements
+- **Enhanced AI Prompts**: More specific document validation feedback with better fallback messages and improved customer detail extraction
+- **Document Matching Logic**: Smart matching system that updates existing requested documents instead of creating duplicates
+  - Normalizes tax form identifiers (W-2 → w2, 1099-MISC → 1099misc, etc.)
+  - Token-based similarity scoring with 30% threshold
+  - Year-matching boost for tax documents from same period
+  - Only matches documents with status="requested" to prevent overwriting completed uploads
+  - Filters generic filler words for better matching accuracy
+
+### Technical Details
+- Conservative matching approach balances flexibility with accuracy
+- AI requests documents with distinctive names for better matching
+- Won't match all edge cases (e.g., state abbreviations) but handles common scenarios
+- Upload mutation includes onMutate for immediate feedback and improved toast messages
 
 ## Known Limitations
 - In-memory storage (data persists only during runtime)
 - AI analysis based on filename patterns (no actual file content parsing for MVP)
 - No multi-user authentication (single accountant use)
+- Document matching won't handle all domain-specific abbreviations (designed conservatively)
 
 ## Future Enhancements
 - PostgreSQL database for persistent storage

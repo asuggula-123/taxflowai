@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Upload, Send, FileText } from "lucide-react";
+import { Upload, Send, FileText, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 
 export interface ChatMessage {
@@ -16,12 +16,14 @@ interface ChatInterfaceProps {
   messages: ChatMessage[];
   onSendMessage?: (message: string) => void;
   onFileUpload?: (files: FileList) => void;
+  isUploading?: boolean;
 }
 
 export function ChatInterface({
   messages,
   onSendMessage,
   onFileUpload,
+  isUploading = false,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -92,7 +94,9 @@ export function ChatInterface({
       <div className="p-4 border-t space-y-3">
         <div
           className={`border-2 border-dashed rounded-md p-6 text-center transition-colors ${
-            isDragging
+            isUploading
+              ? "border-primary bg-primary/10 pointer-events-none"
+              : isDragging
               ? "border-primary bg-primary/5"
               : "border-border"
           }`}
@@ -101,17 +105,28 @@ export function ChatInterface({
           onDragLeave={handleDragLeave}
           data-testid="dropzone-documents"
         >
-          <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground mb-2">
-            Drop documents here or{" "}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="text-primary hover:underline"
-              data-testid="button-browse-files"
-            >
-              browse
-            </button>
-          </p>
+          {isUploading ? (
+            <>
+              <Loader2 className="h-8 w-8 mx-auto mb-2 text-primary animate-spin" />
+              <p className="text-sm text-primary font-medium">
+                Uploading and analyzing documents...
+              </p>
+            </>
+          ) : (
+            <>
+              <FileText className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground mb-2">
+                Drop documents here or{" "}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-primary hover:underline"
+                  data-testid="button-browse-files"
+                >
+                  browse
+                </button>
+              </p>
+            </>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -123,6 +138,7 @@ export function ChatInterface({
               }
             }}
             data-testid="input-file-upload"
+            disabled={isUploading}
           />
         </div>
 

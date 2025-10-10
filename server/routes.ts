@@ -99,15 +99,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const uploadedDocs = [];
       const aiResponses = [];
 
+      // Helper function to normalize and tokenize document names
+      const normalizeToTokens = (name: string): Set<string> => {
+        // Generic filler words to exclude
+        const fillerWords = new Set(['form', 'document', 'documents', 'file', 'copy', 'final', 'draft', 'the', 'a', 'an']);
+        
+        let normalized = name.toLowerCase();
+        
+        // Remove file extension
+        normalized = normalized.replace(/\.(pdf|jpg|jpeg|png|doc|docx)$/i, '');
+        
+        // Preserve common tax form identifiers by removing hyphens within them
+        // W-2 -> w2, 1099-MISC -> 1099misc, etc.
+        normalized = normalized.replace(/\b(w)-?(2)\b/g, 'w2');
+        normalized = normalized.replace(/\b(1099)-?([a-z]*)\b/g, '1099$2');
+        normalized = normalized.replace(/\b(1040)-?([a-z]*)\b/g, '1040$2');
+        normalized = normalized.replace(/\b(1098)-?([a-z]*)\b/g, '1098$2');
+        
+        // Now replace remaining punctuation with spaces
+        normalized = normalized.replace(/[_\-.,;:()\[\]{}]/g, ' ');
+        normalized = normalized.replace(/\s+/g, ' ').trim();
+        
+        // Split into tokens, filter out short words and filler words
+        const tokens = normalized.split(' ')
+          .filter(t => t.length > 1 && !fillerWords.has(t));
+        
+        return new Set(tokens);
+      };
+
+      // Calculate similarity score between two token sets
+      const calculateSimilarity = (requested: Set<string>, upload: Set<string>): number => {
+        if (requested.size === 0 || upload.size === 0) return 0;
+        
+        // Count how many requested tokens appear in upload
+        let matches = 0;
+        for (const token of requested) {
+          if (upload.has(token)) matches++;
+        }
+        
+        // Return ratio of matched requested tokens (0.0 to 1.0)
+        return matches / requested.size;
+      };
+
+      // Fetch requested documents once before processing files
+      const allDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+      let availableRequestedDocs = allDocs.filter((d) => d.status === "requested");
+      const matchedDocIds = new Set<string>();
+
       for (const file of files) {
-        // Create document
-        const document = await storage.createDocument({
-          customerId: req.params.customerId,
-          name: file.originalname,
-          status: "completed",
-          filePath: file.path,
-        });
-        uploadedDocs.push(document);
+        const uploadTokens = normalizeToTokens(file.originalname);
+        
+        // Find best matching requested document from available (unmatched) requests
+        let bestMatch: typeof availableRequestedDocs[0] | null = null;
+        let bestScore = 0;
+        
+        for (const requested of availableRequestedDocs) {
+          // Skip if already matched in this batch
+          if (matchedDocIds.has(requested.id)) continue;
+          
+          const requestedTokens = normalizeToTokens(requested.name);
+          
+          // Skip if no tokens to compare
+          if (requestedTokens.size === 0 || uploadTokens.size === 0) continue;
+          
+          const score = calculateSimilarity(requestedTokens, uploadTokens);
+          
+          // Boost score if there's a year match (indicates same tax period)
+          const hasYearMatch = Array.from(requestedTokens).some(t => 
+            /^\d{4}$/.test(t) && uploadTokens.has(t)
+          );
+          const boostedScore = hasYearMatch ? Math.min(score + 0.3, 1.0) : score;
+          
+          // Lower threshold: at least 30% of requested tokens must be present
+          // or if there's a year match with any other token overlap
+          if (boostedScore >= 0.3 && boostedScore > bestScore) {
+            bestScore = boostedScore;
+            bestMatch = requested;
+          }
+        }
+        
+        const matchingRequested = bestMatch;
+
+        let document;
+        if (matchingRequested) {
+          // Update existing requested document
+          document = await storage.updateDocumentStatus(matchingRequested.id, "completed", file.path);
+          // Mark as matched to prevent reuse in this batch
+          matchedDocIds.add(matchingRequested.id);
+        } else {
+          // Create new document
+          document = await storage.createDocument({
+            customerId: req.params.customerId,
+            name: file.originalname,
+            status: "completed",
+            filePath: file.path,
+          });
+        }
+        
+        if (document) {
+          uploadedDocs.push(document);
+        }
 
         // Analyze document with AI
         const analysis = await analyzeDocument(file.originalname, req.params.customerId);
@@ -119,15 +210,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           content: analysis.feedback,
         });
         aiResponses.push(aiMessage);
-
-        // Mark requested document as completed if it matches
-        const requestedDocs = await storage.getDocumentsByCustomer(req.params.customerId);
-        const matchingRequested = requestedDocs.find(
-          (d) => d.status === "requested" && d.name.toLowerCase().includes(file.originalname.toLowerCase().split('.')[0])
-        );
-        if (matchingRequested) {
-          await storage.updateDocumentStatus(matchingRequested.id, "completed", file.path);
-        }
       }
 
       // Determine next steps after all documents are analyzed

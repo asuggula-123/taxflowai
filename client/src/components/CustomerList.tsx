@@ -16,7 +16,14 @@ interface CustomerListProps {
   onDeleteCustomer?: (customerId: string) => void;
 }
 
-export function CustomerList({ customers, onCustomerClick }: CustomerListProps) {
+export function CustomerList({ customers, onCustomerClick, onDeleteCustomer }: CustomerListProps) {
+  const handleDelete = (e: React.MouseEvent, customerId: string) => {
+    e.stopPropagation();
+    if (confirm('Are you sure you want to delete this customer? This will remove all associated documents and chat history.')) {
+      onDeleteCustomer?.(customerId);
+    }
+  };
+
   return (
     <div className="space-y-2">
       {customers.length === 0 ? (
@@ -46,7 +53,18 @@ export function CustomerList({ customers, onCustomerClick }: CustomerListProps) 
                   </span>
                 </div>
               </div>
-              <StatusBadge status={customer.status} />
+              <div className="flex items-center gap-2">
+                <StatusBadge status={customer.status} />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={(e) => handleDelete(e, customer.id)}
+                  data-testid={`button-delete-customer-${customer.id}`}
+                  className="h-8 w-8"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </Card>
         ))
