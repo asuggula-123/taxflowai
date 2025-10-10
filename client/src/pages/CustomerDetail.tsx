@@ -1,82 +1,136 @@
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { DocumentList, Document } from "@/components/DocumentList";
-import { CustomerDetailsPanel, CustomerDetailItem } from "@/components/CustomerDetailsPanel";
-import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
+import { DocumentList } from "@/components/DocumentList";
+import { CustomerDetailsPanel } from "@/components/CustomerDetailsPanel";
+import { ChatInterface } from "@/components/ChatInterface";
 import { ArrowLeft } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import type { Customer } from "@/components/CustomerList";
+import type { Document } from "@/components/DocumentList";
+import type { CustomerDetailItem } from "@/components/CustomerDetailsPanel";
+import type { ChatMessage } from "@/components/ChatInterface";
 
 export default function CustomerDetail() {
   const [, params] = useRoute("/customer/:id");
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const customerId = params?.id || "";
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  //todo: remove mock functionality
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "1",
-      sender: "ai",
-      content: "Hello! I'll help you gather the necessary documents for this tax return. Let's start with last year's tax return. Please upload the 2023 tax return.",
-      timestamp: new Date(Date.now() - 300000),
+  const { data: customer } = useQuery<Customer>({
+    queryKey: ["/api/customers", customerId],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${customerId}`);
+      if (!response.ok) throw new Error("Customer not found");
+      return response.json();
     },
-  ]);
+    enabled: !!customerId,
+  });
 
-  const [documents, setDocuments] = useState<Document[]>([
-    { id: "1", name: "2023_tax_return.pdf", status: "requested" },
-  ]);
+  const { data: documents = [] } = useQuery<Document[]>({
+    queryKey: ["/api/customers", customerId, "documents"],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${customerId}/documents`);
+      return response.json();
+    },
+    enabled: !!customerId,
+  });
 
-  const [details, setDetails] = useState<CustomerDetailItem[]>([
-    { label: "Full Name", value: "John Smith", category: "Personal Info" },
-    { label: "Email", value: "john.smith@email.com", category: "Personal Info" },
-    { label: "SSN", value: null, category: "Personal Info" },
-    { label: "Filing Status", value: null, category: "Personal Info" },
-    { label: "W2 Income", value: null, category: "Income Sources" },
-    { label: "1099 Income", value: null, category: "Income Sources" },
-    { label: "Mortgage Interest", value: null, category: "Deductions" },
-  ]);
+  const { data: rawMessages = [] } = useQuery<ChatMessage[]>({
+    queryKey: ["/api/customers", customerId, "messages"],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${customerId}/messages`);
+      return response.json();
+    },
+    enabled: !!customerId,
+  });
+
+  const { data: details = [] } = useQuery<CustomerDetailItem[]>({
+    queryKey: ["/api/customers", customerId, "details"],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${customerId}/details`);
+      return response.json();
+    },
+    enabled: !!customerId,
+  });
+
+  const messages = rawMessages.map((m: any) => ({
+    ...m,
+    timestamp: new Date(m.createdAt || Date.now()),
+  }));
+
+  const sendMessageMutation = useMutation({
+    mutationFn: async (content: string) => {
+      return await apiRequest("POST", `/api/customers/${customerId}/messages`, {
+        sender: "accountant",
+        content,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "details"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId] });
+    },
+  });
+
+  const uploadFilesMutation = useMutation({
+    mutationFn: async (files: FileList) => {
+      const formData = new FormData();
+      Array.from(files).forEach((file) => {
+        formData.append("files", file);
+      });
+
+      const response = await fetch(`/api/customers/${customerId}/documents/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Upload failed");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "details"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast({
+        title: "Documents uploaded",
+        description: "AI is analyzing your documents...",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Upload failed",
+        description: "Failed to upload documents.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
   const handleSendMessage = (message: string) => {
-    const newMessage: ChatMessage = {
-      id: String(Date.now()),
-      sender: "accountant",
-      content: message,
-      timestamp: new Date(),
-    };
-    setMessages([...messages, newMessage]);
-
-    setTimeout(() => {
-      const aiResponse: ChatMessage = {
-        id: String(Date.now() + 1),
-        sender: "ai",
-        content: "I've noted that information. Please continue uploading the required documents.",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, aiResponse]);
-    }, 1000);
+    sendMessageMutation.mutate(message);
   };
 
   const handleFileUpload = (files: FileList) => {
-    const fileNames = Array.from(files).map((f) => f.name);
-    
-    fileNames.forEach((name) => {
-      const newDoc: Document = {
-        id: String(Date.now() + Math.random()),
-        name,
-        status: "completed",
-      };
-      setDocuments((prev) => [...prev, newDoc]);
-    });
-
-    setTimeout(() => {
-      const aiResponse: ChatMessage = {
-        id: String(Date.now()),
-        sender: "ai",
-        content: `I've received ${fileNames.length} document(s). Analyzing now...`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, aiResponse]);
-    }, 500);
+    uploadFilesMutation.mutate(files);
   };
+
+  if (!customer) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -92,8 +146,8 @@ export default function CustomerDetail() {
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div className="min-w-0">
-              <h1 className="text-xl font-semibold truncate">John Smith</h1>
-              <p className="text-xs text-muted-foreground">john.smith@email.com</p>
+              <h1 className="text-xl font-semibold truncate">{customer.name}</h1>
+              <p className="text-xs text-muted-foreground">{customer.email}</p>
             </div>
           </div>
           <ThemeToggle />
@@ -116,6 +170,7 @@ export default function CustomerDetail() {
             onSendMessage={handleSendMessage}
             onFileUpload={handleFileUpload}
           />
+          <div ref={messagesEndRef} />
         </div>
       </div>
     </div>

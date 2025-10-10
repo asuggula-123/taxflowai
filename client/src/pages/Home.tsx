@@ -1,32 +1,54 @@
-import { useState } from "react";
 import { AddCustomerDialog } from "@/components/AddCustomerDialog";
 import { CustomerList, Customer } from "@/components/CustomerList";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useLocation } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Home() {
-  //todo: remove mock functionality
-  const [customers, setCustomers] = useState<Customer[]>([
-    { id: "1", name: "John Smith", email: "john.smith@email.com", status: "Ready" },
-    { id: "2", name: "Sarah Johnson", email: "sarah.j@company.com", status: "Incomplete" },
-    { id: "3", name: "Michael Chen", email: "mchen@business.net", status: "Not Started" },
-  ]);
-
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  const { data: customers = [], isLoading } = useQuery<Customer[]>({
+    queryKey: ["/api/customers"],
+  });
+
+  const createCustomerMutation = useMutation({
+    mutationFn: async (data: { name: string; email: string }) => {
+      return await apiRequest("POST", "/api/customers", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast({
+        title: "Customer added",
+        description: "New customer has been created successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create customer.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleAddCustomer = (data: { name: string; email: string }) => {
-    const newCustomer: Customer = {
-      id: String(Date.now()),
-      name: data.name,
-      email: data.email,
-      status: "Not Started",
-    };
-    setCustomers([...customers, newCustomer]);
+    createCustomerMutation.mutate(data);
   };
 
   const handleCustomerClick = (customer: Customer) => {
     setLocation(`/customer/${customer.id}`);
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
