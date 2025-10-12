@@ -87,26 +87,20 @@ Respond in JSON format:
     // Determine the type of error
     let errorMessage = "";
     if (error.status === 429 || error.code === 'insufficient_quota') {
-      errorMessage = "⚠️ OpenAI API quota exceeded. Using fallback analysis. ";
+      errorMessage = "⚠️ OpenAI API quota exceeded. Unable to analyze document at this time.";
     } else if (error.status === 401 || error.code === 'invalid_api_key') {
-      errorMessage = "⚠️ OpenAI API key is invalid. Using fallback analysis. ";
+      errorMessage = "⚠️ OpenAI API key is invalid. Unable to analyze document at this time.";
     } else if (error.message?.includes('API key')) {
-      errorMessage = "⚠️ OpenAI API configuration issue. Using fallback analysis. ";
+      errorMessage = "⚠️ OpenAI API configuration issue. Unable to analyze document at this time.";
     } else {
-      errorMessage = "⚠️ AI analysis temporarily unavailable. Using fallback analysis. ";
+      errorMessage = "⚠️ AI analysis temporarily unavailable. Unable to analyze document at this time.";
     }
     
     return {
-      isValid: true,
-      documentType: "Tax Document",
-      extractedDetails: [
-        {
-          category: "Tax History",
-          label: "Document Type",
-          value: fileName.includes("2023") ? "2023 Tax Year" : "Tax Document"
-        }
-      ],
-      feedback: `${errorMessage}Thank you for uploading ${fileName}. I've received this document successfully. ${fileName.toLowerCase().includes('tax_return') || fileName.toLowerCase().includes('1040') ? 'This appears to be a tax return document.' : fileName.toLowerCase().includes('w2') || fileName.toLowerCase().includes('w-2') ? 'This appears to be a W2 wage statement.' : fileName.toLowerCase().includes('1099') ? 'This appears to be a 1099 income document.' : 'This appears to be a valid tax document.'}`,
+      isValid: false,
+      documentType: undefined,
+      extractedDetails: [],
+      feedback: errorMessage,
     };
   }
 }
@@ -163,68 +157,31 @@ Respond in JSON format:
   } catch (error: any) {
     console.error("Error determining next steps:", error);
     
-    // Log the specific error type
-    let errorPrefix = "";
+    // Determine error message based on error type
+    let errorMessage = "";
     if (error.status === 429 || error.code === 'insufficient_quota') {
-      console.log("⚠️ OpenAI API quota exceeded - using intelligent fallback");
-      errorPrefix = "⚠️ OpenAI API quota exceeded. ";
+      console.log("⚠️ OpenAI API quota exceeded");
+      errorMessage = "⚠️ OpenAI API quota exceeded. Unable to determine next steps at this time.";
     } else if (error.status === 401 || error.code === 'invalid_api_key') {
-      console.log("⚠️ OpenAI API key invalid - using intelligent fallback");
-      errorPrefix = "⚠️ OpenAI API key is invalid. ";
+      console.log("⚠️ OpenAI API key invalid");
+      errorMessage = "⚠️ OpenAI API key is invalid. Unable to determine next steps at this time.";
     } else {
-      console.log("⚠️ OpenAI API error - using intelligent fallback");
-      errorPrefix = "⚠️ AI temporarily unavailable. ";
+      console.log("⚠️ OpenAI API error");
+      errorMessage = "⚠️ AI temporarily unavailable. Unable to determine next steps at this time.";
     }
     
-    // Intelligent fallback: determine missing documents based on what's uploaded
-    const completedNames = completedDocs.map(d => d.name.toLowerCase()).join(" ");
-    const missing: string[] = [];
-    
-    if (completedDocs.length === 0) {
-      // If nothing is uploaded yet, request the essentials
-      missing.push("2023 Tax Return", "W-2 Forms", "1099 Forms (if applicable)");
-    } else {
-      // Check for common tax documents
-      const hasTaxReturn = /tax.*return|1040/i.test(completedNames);
-      const hasW2 = /w-?2/i.test(completedNames);
-      const has1099 = /1099/i.test(completedNames);
-      
-      if (!hasTaxReturn) {
-        missing.push("2023 Tax Return");
-      }
-      if (!hasW2) {
-        missing.push("W-2 Forms");
-      }
-      if (!has1099) {
-        missing.push("1099 Forms (if applicable)");
-      }
-    }
-    
-    // Determine completion status and message
-    const isComplete = missing.length === 0 && completedDocs.length > 0;
-    
-    let message: string;
-    if (completedDocs.length === 0) {
-      message = `${errorPrefix}Let's get started! Please upload the following essential documents: ${missing.join(", ")}.`;
-    } else if (missing.length > 0) {
-      message = `${errorPrefix}Based on what you've uploaded, we still need: ${missing.join(", ")}. Please upload these documents when available.`;
-    } else if (isComplete) {
-      message = `${errorPrefix}Great! You've uploaded all the essential tax documents. The package looks complete and ready for review.`;
-    } else {
-      message = `${errorPrefix}Thank you for uploading your documents. Please upload any additional tax documents you have.`;
-    }
-    
+    // Return minimal response with just the error message
     let customerStatus: "Not Started" | "Incomplete" | "Ready" = "Incomplete";
     if (completedDocs.length === 0) {
       customerStatus = "Not Started";
-    } else if (isComplete) {
-      customerStatus = "Ready";
+    } else if (completedDocs.length > 0) {
+      customerStatus = "Incomplete";
     }
     
     return {
-      missingDocuments: missing,
-      isComplete,
-      message,
+      missingDocuments: [],
+      isComplete: false,
+      message: errorMessage,
       customerStatus,
     };
   }
