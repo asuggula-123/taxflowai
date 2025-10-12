@@ -81,8 +81,21 @@ Respond in JSON format:
     }
 
     return analysis;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error analyzing document:", error);
+    
+    // Determine the type of error
+    let errorMessage = "";
+    if (error.status === 429 || error.code === 'insufficient_quota') {
+      errorMessage = "⚠️ OpenAI API quota exceeded. Using fallback analysis. ";
+    } else if (error.status === 401 || error.code === 'invalid_api_key') {
+      errorMessage = "⚠️ OpenAI API key is invalid. Using fallback analysis. ";
+    } else if (error.message?.includes('API key')) {
+      errorMessage = "⚠️ OpenAI API configuration issue. Using fallback analysis. ";
+    } else {
+      errorMessage = "⚠️ AI analysis temporarily unavailable. Using fallback analysis. ";
+    }
+    
     return {
       isValid: true,
       documentType: "Tax Document",
@@ -93,7 +106,7 @@ Respond in JSON format:
           value: fileName.includes("2023") ? "2023 Tax Year" : "Tax Document"
         }
       ],
-      feedback: `Thank you for uploading ${fileName}. I've received this document successfully. ${fileName.toLowerCase().includes('tax_return') || fileName.toLowerCase().includes('1040') ? 'This appears to be a tax return document.' : fileName.toLowerCase().includes('w2') || fileName.toLowerCase().includes('w-2') ? 'This appears to be a W2 wage statement.' : fileName.toLowerCase().includes('1099') ? 'This appears to be a 1099 income document.' : 'This appears to be a valid tax document.'}`,
+      feedback: `${errorMessage}Thank you for uploading ${fileName}. I've received this document successfully. ${fileName.toLowerCase().includes('tax_return') || fileName.toLowerCase().includes('1040') ? 'This appears to be a tax return document.' : fileName.toLowerCase().includes('w2') || fileName.toLowerCase().includes('w-2') ? 'This appears to be a W2 wage statement.' : fileName.toLowerCase().includes('1099') ? 'This appears to be a 1099 income document.' : 'This appears to be a valid tax document.'}`,
     };
   }
 }
@@ -147,8 +160,21 @@ Respond in JSON format:
     );
 
     return analysis;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error determining next steps:", error);
+    
+    // Log the specific error type
+    let errorPrefix = "";
+    if (error.status === 429 || error.code === 'insufficient_quota') {
+      console.log("⚠️ OpenAI API quota exceeded - using intelligent fallback");
+      errorPrefix = "⚠️ OpenAI API quota exceeded. ";
+    } else if (error.status === 401 || error.code === 'invalid_api_key') {
+      console.log("⚠️ OpenAI API key invalid - using intelligent fallback");
+      errorPrefix = "⚠️ OpenAI API key is invalid. ";
+    } else {
+      console.log("⚠️ OpenAI API error - using intelligent fallback");
+      errorPrefix = "⚠️ AI temporarily unavailable. ";
+    }
     
     // Intelligent fallback: determine missing documents based on what's uploaded
     const completedNames = completedDocs.map(d => d.name.toLowerCase()).join(" ");
@@ -179,13 +205,13 @@ Respond in JSON format:
     
     let message: string;
     if (completedDocs.length === 0) {
-      message = `Let's get started! Please upload the following essential documents: ${missing.join(", ")}.`;
+      message = `${errorPrefix}Let's get started! Please upload the following essential documents: ${missing.join(", ")}.`;
     } else if (missing.length > 0) {
-      message = `Based on what you've uploaded, we still need: ${missing.join(", ")}. Please upload these documents when available.`;
+      message = `${errorPrefix}Based on what you've uploaded, we still need: ${missing.join(", ")}. Please upload these documents when available.`;
     } else if (isComplete) {
-      message = "Great! You've uploaded all the essential tax documents. The package looks complete and ready for review.";
+      message = `${errorPrefix}Great! You've uploaded all the essential tax documents. The package looks complete and ready for review.`;
     } else {
-      message = "Thank you for uploading your documents. Please upload any additional tax documents you have.";
+      message = `${errorPrefix}Thank you for uploading your documents. Please upload any additional tax documents you have.`;
     }
     
     let customerStatus: "Not Started" | "Incomplete" | "Ready" = "Incomplete";
