@@ -149,11 +149,57 @@ Respond in JSON format:
     return analysis;
   } catch (error) {
     console.error("Error determining next steps:", error);
+    
+    // Intelligent fallback: determine missing documents based on what's uploaded
+    const completedNames = completedDocs.map(d => d.name.toLowerCase()).join(" ");
+    const missing: string[] = [];
+    
+    if (completedDocs.length === 0) {
+      // If nothing is uploaded yet, request the essentials
+      missing.push("2023 Tax Return", "W-2 Forms", "1099 Forms (if applicable)");
+    } else {
+      // Check for common tax documents
+      const hasTaxReturn = /tax.*return|1040/i.test(completedNames);
+      const hasW2 = /w-?2/i.test(completedNames);
+      const has1099 = /1099/i.test(completedNames);
+      
+      if (!hasTaxReturn) {
+        missing.push("2023 Tax Return");
+      }
+      if (!hasW2) {
+        missing.push("W-2 Forms");
+      }
+      if (!has1099) {
+        missing.push("1099 Forms (if applicable)");
+      }
+    }
+    
+    // Determine completion status and message
+    const isComplete = missing.length === 0 && completedDocs.length > 0;
+    
+    let message: string;
+    if (completedDocs.length === 0) {
+      message = `Let's get started! Please upload the following essential documents: ${missing.join(", ")}.`;
+    } else if (missing.length > 0) {
+      message = `Based on what you've uploaded, we still need: ${missing.join(", ")}. Please upload these documents when available.`;
+    } else if (isComplete) {
+      message = "Great! You've uploaded all the essential tax documents. The package looks complete and ready for review.";
+    } else {
+      message = "Thank you for uploading your documents. Please upload any additional tax documents you have.";
+    }
+    
+    let customerStatus: "Not Started" | "Incomplete" | "Ready" = "Incomplete";
+    if (completedDocs.length === 0) {
+      customerStatus = "Not Started";
+    } else if (isComplete) {
+      customerStatus = "Ready";
+    }
+    
     return {
-      missingDocuments: [],
-      isComplete: false,
-      message: "Continue uploading documents as needed.",
-      customerStatus: "Incomplete",
+      missingDocuments: missing,
+      isComplete,
+      message,
+      customerStatus,
     };
   }
 }

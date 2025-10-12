@@ -228,9 +228,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create requested documents for missing items
       if (nextSteps.missingDocuments.length > 0) {
+        // Get all existing documents to check for duplicates
+        const allExistingDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+        
         for (const docName of nextSteps.missingDocuments.slice(0, 3)) {
-          const existingDoc = uploadedDocs.find((d) => d.name.includes(docName));
-          if (!existingDoc) {
+          // Check if this requested document already exists
+          const alreadyExists = allExistingDocs.some((d) => 
+            d.name === docName && d.status === "requested"
+          );
+          
+          if (!alreadyExists) {
             await storage.createDocument({
               customerId: req.params.customerId,
               name: docName,

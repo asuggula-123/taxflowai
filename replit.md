@@ -89,7 +89,15 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **AI Follow-up Messages**: Fixed issue where AI would acknowledge document upload but not request additional documents
   - Next steps message now always created after upload, even when AI encounters errors
   - Ensures accountants always receive guidance on what to do next
-  - Fallback message provides basic direction when AI analysis unavailable
+  - **Intelligent Fallback**: When AI is unavailable, system analyzes uploaded documents and automatically requests missing items
+    - Detects tax returns, W-2s, and 1099s from filenames
+    - Creates specific "requested" documents (e.g., "W-2 Forms", "1099 Forms")
+    - Provides context-appropriate messages:
+      - Empty state: "Let's get started! Please upload the following essential documents: ..."
+      - Partial uploads: "Based on what you've uploaded, we still need: ..."
+      - Complete: "Great! You've uploaded all the essential tax documents..."
+    - Prevents duplicate requested documents
+    - Correctly updates customer status (Not Started → Incomplete → Ready)
 
 ### Technical Details
 - Conservative matching approach balances flexibility with accuracy
