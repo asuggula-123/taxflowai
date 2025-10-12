@@ -133,14 +133,22 @@ Respond in JSON format:
     
     // Determine the type of error
     let errorMessage = "";
-    if (error.status === 429 || error.code === 'insufficient_quota') {
-      errorMessage = "⚠️ OpenAI API quota exceeded. Unable to analyze document at this time.";
+    
+    // Check for validation errors first (file size, empty file, etc.)
+    if (error.message?.includes('exceeds 10MB limit')) {
+      errorMessage = `File size exceeds 10MB limit. Please upload a smaller file.`;
+    } else if (error.message?.includes('File is empty')) {
+      errorMessage = `File is empty. Please upload a valid PDF document.`;
+    } else if (error.message?.includes('ENOENT') || error.code === 'ENOENT') {
+      errorMessage = `File not found. Please try uploading again.`;
+    } else if (error.status === 429 || error.code === 'insufficient_quota') {
+      errorMessage = "OpenAI API quota exceeded. Unable to analyze document at this time.";
     } else if (error.status === 401 || error.code === 'invalid_api_key') {
-      errorMessage = "⚠️ OpenAI API key is invalid. Unable to analyze document at this time.";
+      errorMessage = "OpenAI API key is invalid. Unable to analyze document at this time.";
     } else if (error.message?.includes('API key')) {
-      errorMessage = "⚠️ OpenAI API configuration issue. Unable to analyze document at this time.";
+      errorMessage = "OpenAI API configuration issue. Unable to analyze document at this time.";
     } else {
-      errorMessage = "⚠️ AI analysis temporarily unavailable. Unable to analyze document at this time.";
+      errorMessage = "AI analysis temporarily unavailable. Unable to analyze document at this time.";
     }
     
     return {

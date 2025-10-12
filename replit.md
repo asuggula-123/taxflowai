@@ -31,7 +31,10 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **File Upload**: Multer for handling document uploads
 
 ### AI Integration (OpenAI GPT-5)
-- **Document Analysis**: Validates tax documents and extracts information
+- **Document Analysis**: Analyzes actual PDF content using OpenAI Files API + Responses API
+  - Uploads PDF files to OpenAI for content-based analysis
+  - Validates tax documents and extracts information from actual content
+  - Automatic file cleanup after analysis to prevent quota exhaustion
 - **Next Steps Determination**: Analyzes current state and determines missing documents
 - **Chat Response Generation**: Provides helpful responses to accountant queries
 - **Automatic Detail Extraction**: Populates customer details from uploaded documents
@@ -72,6 +75,12 @@ TaxFlow is a professional tax document intake application designed for accountan
 ## Recent Changes (Latest Session - October 12, 2025)
 
 ### New Features
+- **PDF Content Analysis**: Implemented actual PDF content analysis using OpenAI Files API + Responses API
+  - Uploads PDF files to OpenAI for content-based analysis (not just filename pattern matching)
+  - Uses GPT-5 with Responses API to extract specific tax form details and taxpayer information
+  - File validation: 10MB size limit, empty file detection, missing file handling
+  - Automatic cleanup of uploaded OpenAI files to prevent quota exhaustion
+  - Clear user-facing error messages for validation failures and API issues
 - **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup of all related data (documents, messages, details)
 - **Upload Progress Indicators**: Real-time visual feedback during document upload and AI analysis with spinner and disabled states
 
@@ -113,14 +122,14 @@ TaxFlow is a professional tax document intake application designed for accountan
 
 ## Known Limitations
 - In-memory storage (data persists only during runtime)
-- AI analysis based on filename patterns (no actual file content parsing for MVP)
 - No multi-user authentication (single accountant use)
 - Document matching won't handle all domain-specific abbreviations (designed conservatively)
+- 10MB file size limit for PDF uploads
 
 ## Future Enhancements
 - PostgreSQL database for persistent storage
 - Multi-user support with authentication
-- Actual PDF parsing for document content analysis
 - Email notifications for status changes
 - Document version history
 - Export finalized tax packages
+- Support for additional document formats (images, Word docs)
