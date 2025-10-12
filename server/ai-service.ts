@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { storage } from "./storage";
 import type { Document, CustomerDetail } from "@shared/schema";
 import fs from "fs";
-import pdfParse from "pdf-parse";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -35,7 +34,7 @@ export async function analyzeDocument(
   let documentText = "";
   try {
     const dataBuffer = fs.readFileSync(filePath);
-    const pdfData = await pdfParse(dataBuffer);
+    const pdfData = await (pdfParse as any)(dataBuffer);
     documentText = pdfData.text;
   } catch (error) {
     console.error("Error parsing PDF:", error);
