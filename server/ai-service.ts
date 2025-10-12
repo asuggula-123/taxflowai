@@ -30,27 +30,46 @@ export async function analyzeDocument(
   filePath: string,
   customerId: string
 ): Promise<DocumentAnalysis> {
-  // Extract text from PDF
-  let documentText = "";
+  let uploadedFileId: string | null = null;
+  
   try {
-    const dataBuffer = fs.readFileSync(filePath);
-    const pdfData = await (pdfParse as any)(dataBuffer);
-    documentText = pdfData.text;
-  } catch (error) {
-    console.error("Error parsing PDF:", error);
-    documentText = "[Unable to extract text from PDF]";
-  }
+    // Validate file exists and size
+    const stats = fs.statSync(filePath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    
+    if (fileSizeMB > 10) {
+      throw new Error(`File size (${fileSizeMB.toFixed(2)}MB) exceeds 10MB limit`);
+    }
+    
+    if (stats.size === 0) {
+      throw new Error("File is empty");
+    }
 
-  const prompt = `You are a tax preparation assistant analyzing a tax document.
+    // Upload PDF to OpenAI Files API
+    const file = await openai.files.create({
+      file: fs.createReadStream(filePath),
+      purpose: "user_data",
+    });
+    
+    uploadedFileId = file.id;
 
-Document filename: "${fileName}"
-Document content (text extracted from PDF):
-"""
-${documentText.slice(0, 4000)}
-"""
+    // Analyze the uploaded PDF using Responses API
+    const response = await openai.responses.create({
+      model: "gpt-5",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              file_id: file.id,
+            },
+            {
+              type: "input_text",
+              text: `You are an expert tax preparation assistant. Analyze this tax document and extract all relevant information.
 
-Based on the ACTUAL DOCUMENT CONTENT, analyze:
-1. Is this a valid tax document? What specific form is it (Form 1040, W-2, 1099, Schedule C, etc.)?
+Based on the ACTUAL DOCUMENT CONTENT:
+1. Identify the specific form type (Form 1040, W-2, 1099, Schedule C, etc.)
 2. Extract all relevant customer details:
    - For Form 1040: Filing status, taxpayer names, SSN (last 4 digits only), address, tax year
    - For W-2: Employer name, employee name, wages, federal tax withheld
@@ -62,28 +81,30 @@ Provide SPECIFIC, CONFIDENT feedback based on what you actually see in the docum
 Respond in JSON format:
 {
   "isValid": true,
-  "documentType": "string (exact form name like 'Form 1040', 'Form W-2', 'Form 1099-MISC', etc.)",
+  "documentType": "exact form name (e.g., 'Form 1040', 'Form W-2', 'Form 1099-MISC')",
   "missingInfo": ["list any missing or unclear information"],
   "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "actual value from document"}],
-  "feedback": "specific confirmation of what you found in the document - reference actual details you extracted"
-}`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert tax preparation assistant. You analyze actual tax documents and extract precise information from them.",
-        },
-        { role: "user", content: prompt },
+  "feedback": "specific confirmation of what you found - reference actual details you extracted"
+}`
+            }
+          ]
+        }
       ],
-      response_format: { type: "json_object" },
+      response_format: { type: "json_object" }
     });
 
     const analysis: DocumentAnalysis = JSON.parse(
-      response.choices[0].message.content || "{}"
+      response.output_text || "{}"
     );
+    
+    // Clean up uploaded file from OpenAI
+    if (uploadedFileId) {
+      try {
+        await openai.files.del(uploadedFileId);
+      } catch (cleanupError) {
+        console.error("Failed to delete uploaded file:", cleanupError);
+      }
+    }
 
     // Store extracted details in the database
     if (analysis.extractedDetails) {
@@ -100,6 +121,15 @@ Respond in JSON format:
     return analysis;
   } catch (error: any) {
     console.error("Error analyzing document:", error);
+    
+    // Clean up uploaded file even on error
+    if (uploadedFileId) {
+      try {
+        await openai.files.del(uploadedFileId);
+      } catch (cleanupError) {
+        console.error("Failed to delete uploaded file:", cleanupError);
+      }
+    }
     
     // Determine the type of error
     let errorMessage = "";
