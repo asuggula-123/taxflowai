@@ -84,6 +84,12 @@ TaxFlow is a professional tax document intake application designed for accountan
   - Only matches documents with status="requested" to prevent overwriting completed uploads
   - Filters generic filler words for better matching accuracy
   - Tracks matched documents within upload batch to prevent duplicate matches
+  - **Document Name Preservation**: When matching uploaded files to requested documents, actual uploaded filename is preserved instead of generic name
+- **Document List UI**: Improved layout for better readability
+  - Status badge moved to left side of filename (Badge → Icon → Filename)
+  - Long filenames now wrap to multiple lines instead of truncating
+  - Proper alignment with `items-start` for wrapped text
+  - Clean, professional layout with consistent spacing
 
 ### Bug Fixes
 - **AI Follow-up Messages**: Fixed issue where AI would acknowledge document upload but not request additional documents
@@ -98,6 +104,9 @@ TaxFlow is a professional tax document intake application designed for accountan
       - Complete: "Great! You've uploaded all the essential tax documents..."
     - Prevents duplicate requested documents
     - Correctly updates customer status (Not Started → Incomplete → Ready)
+- **Filename Display**: Fixed issue where uploaded documents showed generic names instead of actual filenames
+  - `updateDocumentStatus` now accepts optional name parameter
+  - Requested documents are updated with real uploaded filename when matched
 
 ### Technical Details
 - Conservative matching approach balances flexibility with accuracy
@@ -105,6 +114,7 @@ TaxFlow is a professional tax document intake application designed for accountan
 - Won't match all edge cases (e.g., state abbreviations) but handles common scenarios
 - Upload mutation includes onMutate for immediate feedback and improved toast messages
 - Graceful degradation when OpenAI API encounters quota or other errors
+- **AI Model**: Confirmed using OpenAI GPT-5 (not GPT-5 mini) for all analysis and chat responses
 
 ## Known Limitations
 - In-memory storage (data persists only during runtime)
