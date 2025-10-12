@@ -35,20 +35,26 @@ Based on the filename, determine:
 2. What type of document is this?
 3. What customer details can be extracted? For tax returns, extract filing status. For W2s, note the employer. For 1099s, note the income type.
 
-Provide SPECIFIC, HELPFUL feedback. Examples:
-- "Great! I've received your 2023 tax return. This document is complete and valid."
-- "Perfect! Your W2 from [Employer] has been uploaded successfully. I can see this is for wage income."
-- "Excellent! I've received your 1099-MISC for freelance income. This is a valid tax document."
+IMPORTANT: You are analyzing the FILENAME only (not the actual document content). Be CONFIDENT and DEFINITIVE based on what the filename tells you. If the filename clearly indicates a 1040, W-2, or 1099, confirm it directly without hedging language.
 
-DO NOT say "Manual review recommended" - instead provide specific confirmation or guidance.
+DO NOT use conditional language like:
+- "if the return has a valid 1040"
+- "appears to be"
+- "seems to be"
+- "manual review recommended"
+
+DO use confident, direct language:
+- "Great! I've received your 2023 Form 1040 tax return."
+- "Perfect! Your W-2 has been uploaded successfully."
+- "Excellent! I've received your 1099-MISC."
 
 Respond in JSON format:
 {
   "isValid": true,
-  "documentType": "string (e.g., 'Form W2', '2023 Federal Tax Return', 'Form 1099-MISC', etc.)",
+  "documentType": "string (e.g., 'Form W-2', '2023 Form 1040', 'Form 1099-MISC', etc.)",
   "missingInfo": [],
   "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "specific value or placeholder"}],
-  "feedback": "specific, encouraging feedback about the successfully uploaded document - be detailed and helpful, never say 'manual review recommended'"
+  "feedback": "confident, direct confirmation of the uploaded document - no hedging or conditional language"
 }`;
 
   try {
