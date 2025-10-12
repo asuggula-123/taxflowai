@@ -90,7 +90,7 @@ Respond in JSON format:
           ]
         }
       ],
-      response_format: { type: "json_object" }
+      text: { format: { type: "json_object" } }
     });
 
     const analysis: DocumentAnalysis = JSON.parse(
@@ -100,7 +100,7 @@ Respond in JSON format:
     // Clean up uploaded file from OpenAI
     if (uploadedFileId) {
       try {
-        await openai.files.del(uploadedFileId);
+        await openai.files.delete(uploadedFileId);
       } catch (cleanupError) {
         console.error("Failed to delete uploaded file:", cleanupError);
       }
@@ -125,7 +125,7 @@ Respond in JSON format:
     // Clean up uploaded file even on error
     if (uploadedFileId) {
       try {
-        await openai.files.del(uploadedFileId);
+        await openai.files.delete(uploadedFileId);
       } catch (cleanupError) {
         console.error("Failed to delete uploaded file:", cleanupError);
       }
