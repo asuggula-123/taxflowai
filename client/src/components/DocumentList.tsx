@@ -41,20 +41,20 @@ export function DocumentList({ documents }: DocumentListProps) {
             documents.map((doc) => (
               <Card
                 key={doc.id}
-                className={`p-3 flex items-center gap-3 ${getCardStyle(doc.status)}`}
+                className={`p-3 flex items-start gap-3 ${getCardStyle(doc.status)}`}
                 data-testid={`card-document-${doc.id}`}
               >
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                <span className="flex-1 text-sm font-mono truncate">
-                  {doc.name}
-                </span>
                 <Badge
                   variant="outline"
-                  className={`${getStatusColor(doc.status)} text-xs capitalize`}
+                  className={`${getStatusColor(doc.status)} text-xs capitalize shrink-0 mt-0.5`}
                   data-testid={`badge-document-status-${doc.id}`}
                 >
                   {doc.status}
                 </Badge>
+                <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <span className="flex-1 text-sm font-mono break-words">
+                  {doc.name}
+                </span>
               </Card>
             ))
           )}

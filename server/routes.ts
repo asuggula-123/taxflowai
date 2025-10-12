@@ -183,8 +183,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         let document;
         if (matchingRequested) {
-          // Update existing requested document
-          document = await storage.updateDocumentStatus(matchingRequested.id, "completed", file.path);
+          // Update existing requested document with actual uploaded filename
+          document = await storage.updateDocumentStatus(
+            matchingRequested.id, 
+            "completed", 
+            file.path,
+            file.originalname
+          );
           // Mark as matched to prevent reuse in this batch
           matchedDocIds.add(matchingRequested.id);
         } else {

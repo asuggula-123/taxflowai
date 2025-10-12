@@ -21,7 +21,7 @@ export interface IStorage {
   // Document operations
   getDocumentsByCustomer(customerId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
-  updateDocumentStatus(id: string, status: string, filePath?: string): Promise<Document | undefined>;
+  updateDocumentStatus(id: string, status: string, filePath?: string, name?: string): Promise<Document | undefined>;
 
   // Chat message operations
   getChatMessagesByCustomer(customerId: string): Promise<ChatMessage[]>;
@@ -138,12 +138,18 @@ export class MemStorage implements IStorage {
   async updateDocumentStatus(
     id: string,
     status: string,
-    filePath?: string
+    filePath?: string,
+    name?: string
   ): Promise<Document | undefined> {
     const document = this.documents.get(id);
     if (!document) return undefined;
 
-    const updated = { ...document, status, filePath: filePath || document.filePath };
+    const updated = { 
+      ...document, 
+      status, 
+      filePath: filePath || document.filePath,
+      name: name || document.name
+    };
     this.documents.set(id, updated);
     return updated;
   }
