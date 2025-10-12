@@ -95,25 +95,20 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **AI Follow-up Messages**: Fixed issue where AI would acknowledge document upload but not request additional documents
   - Next steps message now always created after upload, even when AI encounters errors
   - Ensures accountants always receive guidance on what to do next
-  - **Intelligent Fallback**: When AI is unavailable, system analyzes uploaded documents and automatically requests missing items
-    - Detects tax returns, W-2s, and 1099s from filenames
-    - Creates specific "requested" documents (e.g., "W-2 Forms", "1099 Forms")
-    - Provides context-appropriate messages:
-      - Empty state: "Let's get started! Please upload the following essential documents: ..."
-      - Partial uploads: "Based on what you've uploaded, we still need: ..."
-      - Complete: "Great! You've uploaded all the essential tax documents..."
-    - Prevents duplicate requested documents
-    - Correctly updates customer status (Not Started → Incomplete → Ready)
 - **Filename Display**: Fixed issue where uploaded documents showed generic names instead of actual filenames
   - `updateDocumentStatus` now accepts optional name parameter
   - Requested documents are updated with real uploaded filename when matched
+- **Error Handling**: Removed fallback AI responses when OpenAI API is unavailable
+  - Now shows clean error messages only (e.g., "⚠️ OpenAI API quota exceeded. Unable to analyze document at this time.")
+  - No misleading fallback suggestions or analysis attempts
+  - Users see exactly when AI is working vs when there's an issue
 
 ### Technical Details
 - Conservative matching approach balances flexibility with accuracy
 - AI requests documents with distinctive names for better matching
 - Won't match all edge cases (e.g., state abbreviations) but handles common scenarios
 - Upload mutation includes onMutate for immediate feedback and improved toast messages
-- Graceful degradation when OpenAI API encounters quota or other errors
+- Clean error handling when OpenAI API encounters quota or other errors
 - **AI Model**: Confirmed using OpenAI GPT-5 (not GPT-5 mini) for all analysis and chat responses
 
 ## Known Limitations
