@@ -207,7 +207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Analyze document with AI
-        const analysis = await analyzeDocument(file.originalname, req.params.customerId);
+        const analysis = await analyzeDocument(file.originalname, file.path, req.params.customerId);
         
         // Create AI response message
         const aiMessage = await storage.createChatMessage({

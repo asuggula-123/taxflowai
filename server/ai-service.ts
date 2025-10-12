@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { storage } from "./storage";
 import type { Document, CustomerDetail } from "@shared/schema";
+import fs from "fs";
+import pdfParse from "pdf-parse";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -26,35 +28,45 @@ interface NextStepsAnalysis {
 
 export async function analyzeDocument(
   fileName: string,
+  filePath: string,
   customerId: string
 ): Promise<DocumentAnalysis> {
-  const prompt = `You are a tax preparation assistant analyzing a document named "${fileName}".
+  // Extract text from PDF
+  let documentText = "";
+  try {
+    const dataBuffer = fs.readFileSync(filePath);
+    const pdfData = await pdfParse(dataBuffer);
+    documentText = pdfData.text;
+  } catch (error) {
+    console.error("Error parsing PDF:", error);
+    documentText = "[Unable to extract text from PDF]";
+  }
 
-Based on the filename, determine:
-1. Is this a valid tax document? (W2, 1099, tax return, business expenses, etc.)
-2. What type of document is this?
-3. What customer details can be extracted? For tax returns, extract filing status. For W2s, note the employer. For 1099s, note the income type.
+  const prompt = `You are a tax preparation assistant analyzing a tax document.
 
-IMPORTANT: You are analyzing the FILENAME only (not the actual document content). Be CONFIDENT and DEFINITIVE based on what the filename tells you. If the filename clearly indicates a 1040, W-2, or 1099, confirm it directly without hedging language.
+Document filename: "${fileName}"
+Document content (text extracted from PDF):
+"""
+${documentText.slice(0, 4000)}
+"""
 
-DO NOT use conditional language like:
-- "if the return has a valid 1040"
-- "appears to be"
-- "seems to be"
-- "manual review recommended"
+Based on the ACTUAL DOCUMENT CONTENT, analyze:
+1. Is this a valid tax document? What specific form is it (Form 1040, W-2, 1099, Schedule C, etc.)?
+2. Extract all relevant customer details:
+   - For Form 1040: Filing status, taxpayer names, SSN (last 4 digits only), address, tax year
+   - For W-2: Employer name, employee name, wages, federal tax withheld
+   - For 1099: Payer name, recipient name, income type, amount
+   - For any form: Any other relevant tax information
 
-DO use confident, direct language:
-- "Great! I've received your 2023 Form 1040 tax return."
-- "Perfect! Your W-2 has been uploaded successfully."
-- "Excellent! I've received your 1099-MISC."
+Provide SPECIFIC, CONFIDENT feedback based on what you actually see in the document.
 
 Respond in JSON format:
 {
   "isValid": true,
-  "documentType": "string (e.g., 'Form W-2', '2023 Form 1040', 'Form 1099-MISC', etc.)",
-  "missingInfo": [],
-  "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "specific value or placeholder"}],
-  "feedback": "confident, direct confirmation of the uploaded document - no hedging or conditional language"
+  "documentType": "string (exact form name like 'Form 1040', 'Form W-2', 'Form 1099-MISC', etc.)",
+  "missingInfo": ["list any missing or unclear information"],
+  "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "actual value from document"}],
+  "feedback": "specific confirmation of what you found in the document - reference actual details you extracted"
 }`;
 
   try {
@@ -63,7 +75,7 @@ Respond in JSON format:
       messages: [
         {
           role: "system",
-          content: "You are an expert tax preparation assistant helping accountants collect and validate tax documents.",
+          content: "You are an expert tax preparation assistant. You analyze actual tax documents and extract precise information from them.",
         },
         { role: "user", content: prompt },
       ],
