@@ -69,7 +69,7 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **AI**: OpenAI GPT-5
 - **Storage**: In-memory (MemStorage) - can be migrated to PostgreSQL
 
-## Recent Changes (Latest Session - October 10, 2025)
+## Recent Changes (Latest Session - October 12, 2025)
 
 ### New Features
 - **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup of all related data (documents, messages, details)
@@ -83,12 +83,20 @@ TaxFlow is a professional tax document intake application designed for accountan
   - Year-matching boost for tax documents from same period
   - Only matches documents with status="requested" to prevent overwriting completed uploads
   - Filters generic filler words for better matching accuracy
+  - Tracks matched documents within upload batch to prevent duplicate matches
+
+### Bug Fixes
+- **AI Follow-up Messages**: Fixed issue where AI would acknowledge document upload but not request additional documents
+  - Next steps message now always created after upload, even when AI encounters errors
+  - Ensures accountants always receive guidance on what to do next
+  - Fallback message provides basic direction when AI analysis unavailable
 
 ### Technical Details
 - Conservative matching approach balances flexibility with accuracy
 - AI requests documents with distinctive names for better matching
 - Won't match all edge cases (e.g., state abbreviations) but handles common scenarios
 - Upload mutation includes onMutate for immediate feedback and improved toast messages
+- Graceful degradation when OpenAI API encounters quota or other errors
 
 ## Known Limitations
 - In-memory storage (data persists only during runtime)

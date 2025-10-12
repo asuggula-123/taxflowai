@@ -133,7 +133,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Count how many requested tokens appear in upload
         let matches = 0;
-        for (const token of requested) {
+        const requestedTokens = Array.from(requested);
+        for (const token of requestedTokens) {
           if (upload.has(token)) matches++;
         }
         
@@ -218,15 +219,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update customer status
       await storage.updateCustomerStatus(req.params.customerId, nextSteps.customerStatus);
 
-      // Add next steps message if there are missing documents
-      if (nextSteps.missingDocuments.length > 0) {
-        await storage.createChatMessage({
-          customerId: req.params.customerId,
-          sender: "ai",
-          content: nextSteps.message,
-        });
+      // Always create next steps message
+      await storage.createChatMessage({
+        customerId: req.params.customerId,
+        sender: "ai",
+        content: nextSteps.message,
+      });
 
-        // Create requested documents
+      // Create requested documents for missing items
+      if (nextSteps.missingDocuments.length > 0) {
         for (const docName of nextSteps.missingDocuments.slice(0, 3)) {
           const existingDoc = uploadedDocs.find((d) => d.name.includes(docName));
           if (!existingDoc) {
@@ -237,12 +238,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
         }
-      } else if (nextSteps.isComplete) {
-        await storage.createChatMessage({
-          customerId: req.params.customerId,
-          sender: "ai",
-          content: nextSteps.message,
-        });
       }
 
       res.status(201).json({ documents: uploadedDocs, aiResponses });
