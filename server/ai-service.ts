@@ -476,16 +476,20 @@ export async function determineNextSteps(
           const has1099 = docLower.includes('1099');
           if (!has1099) return false;
           
-          // Check for specific 1099 type if specified (e.g., "1099-nec", "1099nec")
+          // Check for specific 1099 type if specified (e.g., "1099-nec", "1099nec", "1099 nec")
           if (form1099Type) {
             // Extract the subtype (e.g., "nec" from "1099-nec")
             const subtypeMatch = form1099Type.match(/1099-([a-z]+)/);
             if (subtypeMatch) {
               const subtype = subtypeMatch[1];
-              // Match "1099-NEC", "1099NEC", or "1099_NEC" patterns
+              // Match specific 1099 filename patterns (be precise to avoid false positives)
+              // Patterns: "1099-NEC", "1099NEC", "1099_NEC", "1099 NEC", "1099.NEC"
+              // We check that 1099 and subtype are adjacent or separated by common delimiters only
               const hasType = docLower.includes(`1099-${subtype}`) || 
                              docLower.includes(`1099${subtype}`) ||
-                             docLower.includes(`1099_${subtype}`);
+                             docLower.includes(`1099_${subtype}`) ||
+                             docLower.includes(`1099 ${subtype}`) ||
+                             docLower.includes(`1099.${subtype}`);
               if (!hasType) return false;
             }
           }
@@ -511,7 +515,11 @@ export async function determineNextSteps(
       
       // K-1 matching
       if (isK1) {
-        const hasK1 = docLower.includes('k-1') || docLower.includes('k1');
+        // Match various K-1 filename patterns: "K-1", "K1", "K 1", "Schedule K-1", "Form K1", etc.
+        const hasK1 = docLower.includes('k-1') || 
+                     docLower.includes('k1') || 
+                     docLower.includes('k 1') ||
+                     (docLower.includes('schedule') && docLower.includes('k'));
         if (!hasK1) return false;
         
         // Check for entity name if specified

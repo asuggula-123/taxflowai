@@ -31,13 +31,15 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **File Upload**: Multer for handling document uploads
 
 ### AI Integration (OpenAI GPT-5)
-- **Document Analysis**: Analyzes actual PDF content using OpenAI Files API + Responses API
+- **Document Analysis**: Two-phase structured approach for guaranteed specificity
+  - Phase 1: Extracts structured entities (employers[], form1099Payers[], scheduleC, scheduleE, formK1[], form1098, personalInfo)
+  - Phase 2: Programmatically generates specific document requests from entities
   - Uploads PDF files to OpenAI for content-based analysis
   - Validates tax documents and extracts information from actual content
   - Automatic file cleanup after analysis to prevent quota exhaustion
-- **Next Steps Determination**: Analyzes current state and determines missing documents
+- **Entity Accumulation**: Merges entities across multiple uploads (preserves all data)
+- **Intelligent Document Matching**: Pattern-based reconciliation with multiple filename variants
 - **Chat Response Generation**: Provides helpful responses to accountant queries
-- **Automatic Detail Extraction**: Populates customer details from uploaded documents
 
 ## Data Model
 
@@ -75,30 +77,42 @@ TaxFlow is a professional tax document intake application designed for accountan
 ## Recent Changes (Latest Session - October 13, 2025)
 
 ### New Features
+- **Two-Phase Structured Approach**: Replaced prompt-engineering with structural enforcement for guaranteed specificity
+  - Phase 1 (analyzeDocument): Extracts structured entities from tax documents
+    - Employers: name, wages, year (one object per employer)
+    - 1099 Payers: name, type (1099-NEC, 1099-INT, etc.), amount, year
+    - Schedule C, E, K-1, Form 1098: Specific business/property/entity details
+    - Personal info and itemized deductions
+  - Phase 2 (determineNextSteps): Programmatically generates specific requests from entities
+    - One request per employer: "W-2 from [Employer Name] for [Year]"
+    - One request per 1099 payer: "[1099-Type] from [Payer Name] for [Year]"
+    - Specific requests for Schedule C, E, K-1, Form 1098 based on extracted data
+    - **Impossible to generate generic "as applicable" requests**
+- **Entity Accumulation**: Merges entities across multiple uploads
+  - Deep clones existing entities, then overlays new entities
+  - Prevents data loss when AI omits arrays in subsequent uploads
+  - Deduplicates by name+year (employers), name+type+year (1099s), entity+type+year (K-1s)
+- **Intelligent Document Matching**: Pattern-based reconciliation for real-world filenames
+  - Handles multiple delimiter patterns: `1099-NEC`, `1099NEC`, `1099_NEC`, `1099 NEC`, `1099.NEC`
+  - SSA-1099 specific handling: `ssa-1099`, `ssa1099`, `ssa + 1099`
+  - K-1 variants: `k-1`, `k1`, `k 1`, `schedule k-1`
+  - W-2 variants: `w-2`, `w2`, `w 2`
+  - Entity name word-matching (e.g., "Google" in filename matches "Google LLC")
+  - **No false positives**: Requires explicit delimiter-based patterns
 - **PDF Content Analysis**: Implemented actual PDF content analysis using OpenAI Files API + Responses API
-  - Uploads PDF files to OpenAI for content-based analysis (not just filename pattern matching)
-  - Uses GPT-5 with Responses API to extract specific tax form details and taxpayer information
+  - Uploads PDF files to OpenAI for content-based analysis
+  - Uses GPT-5 with Responses API to extract specific tax form details
   - File validation: 10MB size limit, empty file detection, missing file handling
   - Automatic cleanup of uploaded OpenAI files to prevent quota exhaustion
-  - Clear user-facing error messages for validation failures and API issues
-- **Specific Document Requests**: AI now requests exact documents based on tax return analysis
-  - Extracts specific employer names, income types, and amounts from tax returns
-  - Requests documents by name (e.g., "W-2 from Google LLC for 2024" instead of "W-2s from all employers")
-  - Eliminates vague "as applicable" language in document requests
-  - Uses extracted details to generate precise, actionable follow-up document lists
-- **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup of all related data (documents, messages, details)
-- **Upload Progress Indicators**: Real-time visual feedback during document upload and AI analysis with spinner and disabled states
+- **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup
+- **Upload Progress Indicators**: Real-time visual feedback during document upload and AI analysis
 
 ### Improvements
-- **Enhanced Detail Extraction**: AI extracts specific names, amounts, and types from tax documents
-  - For Form 1040: Lists each employer/payer name separately with amounts
-  - For 1099s: Identifies exact 1099 types (NEC, MISC, INT, DIV, etc.)
-  - For Schedule C: Extracts business names and types
-  - All details stored with category organization for better AI analysis
-- **Context-Aware Document Requests**: determineNextSteps uses structured detail summary
-  - Groups extracted details by category (Income Sources, Personal Info, etc.)
-  - Passes organized context to AI for precise document matching
-  - Forbids generic phrasing in favor of specific requests
+- **Expanded Form Coverage**: Now handles all major tax forms
+  - W-2, all 1099 types (NEC, INT, DIV, R, MISC, SSA-1099, etc.)
+  - Schedule C (business), Schedule E (rental property)
+  - Form K-1 (partnerships, S-corps, estates, trusts)
+  - Form 1098 (mortgage interest)
 - **Document Matching Logic**: Smart matching system that updates existing requested documents instead of creating duplicates
   - Normalizes tax form identifiers (W-2 → w2, 1099-MISC → 1099misc, etc.)
   - Token-based similarity scoring with 30% threshold
