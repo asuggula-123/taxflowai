@@ -72,7 +72,7 @@ TaxFlow is a professional tax document intake application designed for accountan
 - **AI**: OpenAI GPT-5
 - **Storage**: In-memory (MemStorage) - can be migrated to PostgreSQL
 
-## Recent Changes (Latest Session - October 12, 2025)
+## Recent Changes (Latest Session - October 13, 2025)
 
 ### New Features
 - **PDF Content Analysis**: Implemented actual PDF content analysis using OpenAI Files API + Responses API
@@ -81,11 +81,24 @@ TaxFlow is a professional tax document intake application designed for accountan
   - File validation: 10MB size limit, empty file detection, missing file handling
   - Automatic cleanup of uploaded OpenAI files to prevent quota exhaustion
   - Clear user-facing error messages for validation failures and API issues
+- **Specific Document Requests**: AI now requests exact documents based on tax return analysis
+  - Extracts specific employer names, income types, and amounts from tax returns
+  - Requests documents by name (e.g., "W-2 from Google LLC for 2024" instead of "W-2s from all employers")
+  - Eliminates vague "as applicable" language in document requests
+  - Uses extracted details to generate precise, actionable follow-up document lists
 - **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup of all related data (documents, messages, details)
 - **Upload Progress Indicators**: Real-time visual feedback during document upload and AI analysis with spinner and disabled states
 
 ### Improvements
-- **Enhanced AI Prompts**: More specific document validation feedback with better fallback messages and improved customer detail extraction
+- **Enhanced Detail Extraction**: AI extracts specific names, amounts, and types from tax documents
+  - For Form 1040: Lists each employer/payer name separately with amounts
+  - For 1099s: Identifies exact 1099 types (NEC, MISC, INT, DIV, etc.)
+  - For Schedule C: Extracts business names and types
+  - All details stored with category organization for better AI analysis
+- **Context-Aware Document Requests**: determineNextSteps uses structured detail summary
+  - Groups extracted details by category (Income Sources, Personal Info, etc.)
+  - Passes organized context to AI for precise document matching
+  - Forbids generic phrasing in favor of specific requests
 - **Document Matching Logic**: Smart matching system that updates existing requested documents instead of creating duplicates
   - Normalizes tax form identifiers (W-2 → w2, 1099-MISC → 1099misc, etc.)
   - Token-based similarity scoring with 30% threshold
