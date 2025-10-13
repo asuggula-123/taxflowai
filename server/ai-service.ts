@@ -6,10 +6,38 @@ import fs from "fs";
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Structured entities extracted from tax documents
+interface TaxEntities {
+  employers?: Array<{
+    name: string;
+    wages: number;
+    year: number;
+  }>;
+  form1099Types?: string[]; // e.g., ["1099-NEC", "1099-INT"]
+  form1099Payers?: Array<{
+    name: string;
+    type: string; // e.g., "1099-NEC"
+    amount: number;
+    year: number;
+  }>;
+  scheduleC?: {
+    businessName: string;
+    hasIncome: boolean;
+    year: number;
+  };
+  personalInfo?: {
+    taxpayerName?: string;
+    filingStatus?: string;
+    taxYear?: number;
+  };
+  itemizedDeductions?: string[]; // e.g., ["mortgage interest", "charitable donations"]
+}
+
 interface DocumentAnalysis {
   isValid: boolean;
   documentType?: string;
   missingInfo?: string[];
+  entities?: TaxEntities;
   extractedDetails?: Array<{
     category: string;
     label: string;
@@ -66,47 +94,42 @@ export async function analyzeDocument(
             },
             {
               type: "input_text",
-              text: `You are an expert tax preparation assistant. Analyze this tax document and extract SPECIFIC, DETAILED information.
+              text: `You are an expert tax preparation assistant. Analyze this tax document and extract STRUCTURED entities.
 
-Based on the ACTUAL DOCUMENT CONTENT:
+Based on the ACTUAL DOCUMENT CONTENT, extract structured data:
 
-1. Identify the exact form type and tax year
-2. Extract DETAILED information with SPECIFIC NAMES and AMOUNTS:
-   
-   For Form 1040 (Tax Return):
-   - Personal info: Taxpayer names, filing status, address, SSN (last 4 digits only)
-   - Income sources: Extract EACH employer/payer name with amounts from:
-     * W-2 wages (line 1): List each employer separately
-     * 1099 income types (lines 2-9): Specify which types (1099-NEC, 1099-MISC, 1099-INT, etc.)
-     * Business income (Schedule C): Note business name/type
-     * Other income sources shown
-   - Deductions: Itemized vs standard, specific deductions claimed
-   - Tax year and filing period
-   
-   For W-2:
-   - Employer name (Box b)
-   - Employee name
-   - Wages and withholding amounts
-   - Tax year
-   
-   For 1099 forms:
-   - Payer name (Box 1)
-   - Type of 1099 (NEC, MISC, INT, DIV, etc.)
-   - Income amounts
-   - Tax year
+For Form 1040 (Tax Return):
+- Extract EACH W-2 employer as separate object with name, wages, year
+- Extract EACH 1099 payer with type (1099-NEC, 1099-INT, etc.), payer name, amount, year
+- Extract Schedule C business info if present
+- Extract personal info (taxpayer name, filing status, tax year)
+- Extract itemized deductions if applicable
 
-Be SPECIFIC with names, amounts, and types. For example:
-- Good: "W-2 income from Google LLC ($85,000) and Meta Platforms Inc ($12,000)"
-- Bad: "W-2 income from employers"
+For W-2:
+- Extract employer as single employer object
+
+For 1099:
+- Extract as single 1099 payer object
+
+CRITICAL: Extract actual entities found in the document, not generic categories.
 
 Respond in JSON format:
 {
   "isValid": true,
   "documentType": "exact form name with year (e.g., 'Form 1040 (2023)', 'Form W-2 (2024)')",
   "missingInfo": ["list any missing information"],
-  "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label with specific names", "value": "actual value from document with amounts/details"}],
-  "feedback": "specific confirmation mentioning actual employer names, income types, and amounts you found"
-}`
+  "entities": {
+    "employers": [{"name": "Google LLC", "wages": 85000, "year": 2024}],
+    "form1099Payers": [{"name": "Stripe Inc", "type": "1099-NEC", "amount": 15000, "year": 2024}],
+    "scheduleC": {"businessName": "Acme Consulting", "hasIncome": true, "year": 2024},
+    "personalInfo": {"taxpayerName": "John Doe", "filingStatus": "Married Filing Jointly", "taxYear": 2023},
+    "itemizedDeductions": ["mortgage interest", "charitable donations"]
+  },
+  "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "value"}],
+  "feedback": "specific confirmation of what you found"
+}
+
+IMPORTANT: Only include entity fields that are actually found in the document. Leave arrays empty if no entities found.`
             }
           ]
         }
@@ -127,7 +150,17 @@ Respond in JSON format:
       }
     }
 
-    // Store extracted details in the database
+    // Store extracted entities as a special detail record
+    if (analysis.entities) {
+      await storage.upsertCustomerDetail({
+        customerId,
+        category: "TaxEntities",
+        label: "StructuredEntities",
+        value: JSON.stringify(analysis.entities),
+      });
+    }
+
+    // Store extracted details in the database (for display purposes)
     if (analysis.extractedDetails) {
       for (const detail of analysis.extractedDetails) {
         await storage.upsertCustomerDetail({
@@ -181,6 +214,45 @@ Respond in JSON format:
   }
 }
 
+// Helper function to generate specific document requests from structured entities
+function generateDocumentRequestsFromEntities(entities: TaxEntities): string[] {
+  const requests: string[] = [];
+
+  // Generate W-2 requests for each employer
+  if (entities.employers && entities.employers.length > 0) {
+    entities.employers.forEach(employer => {
+      requests.push(`W-2 from ${employer.name} for ${employer.year}`);
+    });
+  }
+
+  // Generate 1099 requests for each payer
+  if (entities.form1099Payers && entities.form1099Payers.length > 0) {
+    entities.form1099Payers.forEach(payer => {
+      requests.push(`${payer.type} from ${payer.name} for ${payer.year}`);
+    });
+  }
+
+  // Generate Schedule C request if business income exists
+  if (entities.scheduleC && entities.scheduleC.hasIncome) {
+    requests.push(`Schedule C business records for ${entities.scheduleC.businessName} (${entities.scheduleC.year})`);
+  }
+
+  // Generate itemized deduction requests
+  if (entities.itemizedDeductions && entities.itemizedDeductions.length > 0) {
+    entities.itemizedDeductions.forEach(deduction => {
+      if (deduction.toLowerCase().includes('mortgage')) {
+        requests.push(`Form 1098 (Mortgage Interest Statement) for ${entities.personalInfo?.taxYear || 'current year'}`);
+      } else if (deduction.toLowerCase().includes('charitable')) {
+        requests.push(`Charitable donation receipts for ${entities.personalInfo?.taxYear || 'current year'}`);
+      } else {
+        requests.push(`${deduction} documentation for ${entities.personalInfo?.taxYear || 'current year'}`);
+      }
+    });
+  }
+
+  return requests;
+}
+
 export async function determineNextSteps(
   customerId: string
 ): Promise<NextStepsAnalysis> {
@@ -190,98 +262,58 @@ export async function determineNextSteps(
   const completedDocs = documents.filter((d) => d.status === "completed");
   const requestedDocs = documents.filter((d) => d.status === "requested");
 
-  // Organize details by category for better analysis
-  const detailsByCategory = details.reduce((acc, detail) => {
-    if (!acc[detail.category]) {
-      acc[detail.category] = [];
+  // Retrieve structured entities
+  const entitiesDetail = details.find(d => d.category === "TaxEntities" && d.label === "StructuredEntities");
+  let entities: TaxEntities = {};
+  
+  if (entitiesDetail && entitiesDetail.value) {
+    try {
+      entities = JSON.parse(entitiesDetail.value);
+    } catch (error) {
+      console.error("Error parsing entities:", error);
     }
-    acc[detail.category].push(`${detail.label}: ${detail.value}`);
-    return acc;
-  }, {} as Record<string, string[]>);
-
-  const detailsSummary = Object.entries(detailsByCategory)
-    .map(([category, items]) => `${category}:\n  - ${items.join("\n  - ")}`)
-    .join("\n\n");
-
-  const prompt = `You are a tax preparation assistant. Based on the ACTUAL TAX RETURN ANALYSIS, determine what SPECIFIC documents are still needed.
-
-COMPLETED DOCUMENTS:
-${completedDocs.map((d) => d.name).join("\n") || "None yet"}
-
-ALREADY REQUESTED DOCUMENTS:
-${requestedDocs.map((d) => d.name).join("\n") || "None"}
-
-INFORMATION EXTRACTED FROM TAX RETURN:
-${detailsSummary || "No tax return uploaded yet"}
-
-INSTRUCTIONS:
-1. Analyze what income sources, deductions, and other items are shown in the extracted tax return details
-2. Request SPECIFIC documents for those exact items (not generic categories)
-3. Examples of SPECIFIC requests:
-   - If W-2 income from "ABC Corp" is shown → request "W-2 from ABC Corp for 2024"
-   - If 1099-NEC income shown → request "1099-NEC forms for 2024"
-   - If Schedule C business income shown → request "Schedule C business income/expense records for 2024"
-   - If specific deductions shown → request those exact supporting documents
-
-DO NOT request generic "as applicable" documents. Only request documents for items that are SPECIFICALLY shown in the tax return or that are standard follow-up documents for items found.
-
-Respond in JSON format:
-{
-  "missingDocuments": ["array of SPECIFIC documents with exact names/sources when known"],
-  "isComplete": boolean (true only if ALL necessary documents are collected),
-  "message": "friendly message to the accountant about what's needed next",
-  "customerStatus": "Not Started" | "Incomplete" | "Ready"
-}`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert tax preparation assistant. Your job is to request SPECIFIC documents based on what you find in the tax return, not generic categories. Be precise and actionable.",
-        },
-        { role: "user", content: prompt },
-      ],
-      response_format: { type: "json_object" },
-    });
-
-    const analysis: NextStepsAnalysis = JSON.parse(
-      response.choices[0].message.content || "{}"
-    );
-
-    return analysis;
-  } catch (error: any) {
-    console.error("Error determining next steps:", error);
-    
-    // Determine error message based on error type
-    let errorMessage = "";
-    if (error.status === 429 || error.code === 'insufficient_quota') {
-      console.log("⚠️ OpenAI API quota exceeded");
-      errorMessage = "⚠️ OpenAI API quota exceeded. Unable to determine next steps at this time.";
-    } else if (error.status === 401 || error.code === 'invalid_api_key') {
-      console.log("⚠️ OpenAI API key invalid");
-      errorMessage = "⚠️ OpenAI API key is invalid. Unable to determine next steps at this time.";
-    } else {
-      console.log("⚠️ OpenAI API error");
-      errorMessage = "⚠️ AI temporarily unavailable. Unable to determine next steps at this time.";
-    }
-    
-    // Return minimal response with just the error message
-    let customerStatus: "Not Started" | "Incomplete" | "Ready" = "Incomplete";
-    if (completedDocs.length === 0) {
-      customerStatus = "Not Started";
-    } else if (completedDocs.length > 0) {
-      customerStatus = "Incomplete";
-    }
-    
-    return {
-      missingDocuments: [],
-      isComplete: false,
-      message: errorMessage,
-      customerStatus,
-    };
   }
+
+  // Generate specific document requests from entities
+  const requiredDocuments = generateDocumentRequestsFromEntities(entities);
+
+  // Filter out already completed documents
+  const completedDocNames = new Set(completedDocs.map(d => d.name.toLowerCase()));
+  const missingDocuments = requiredDocuments.filter(req => {
+    // Simple check: if any completed doc contains the main identifier
+    return !Array.from(completedDocNames).some(completed => 
+      completed.includes(req.toLowerCase().split(' ')[0])
+    );
+  });
+
+  // Determine completion status
+  const isComplete = missingDocuments.length === 0 && requiredDocuments.length > 0;
+  
+  let customerStatus: "Not Started" | "Incomplete" | "Ready" = "Incomplete";
+  if (completedDocs.length === 0) {
+    customerStatus = "Not Started";
+  } else if (isComplete) {
+    customerStatus = "Ready";
+  }
+
+  // Generate message
+  let message = "";
+  if (isComplete) {
+    message = "All required documents have been collected. This customer is ready for tax preparation!";
+  } else if (missingDocuments.length > 0) {
+    message = `Please upload the following documents: ${missingDocuments.slice(0, 3).join(", ")}${missingDocuments.length > 3 ? `, and ${missingDocuments.length - 3} more` : ""}.`;
+  } else if (completedDocs.length === 0) {
+    message = "Please upload the customer's most recent tax return to get started.";
+  } else {
+    message = "Continue uploading required documents.";
+  }
+
+  return {
+    missingDocuments,
+    isComplete,
+    message,
+    customerStatus,
+  };
 }
 
 export async function generateChatResponse(
