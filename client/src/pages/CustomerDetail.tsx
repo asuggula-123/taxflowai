@@ -70,10 +70,45 @@ export default function CustomerDetail() {
         content,
       });
     },
+    onMutate: async (content: string) => {
+      // Cancel any outgoing refetches to avoid optimistic update being overwritten
+      await queryClient.cancelQueries({ queryKey: ["/api/customers", customerId, "messages"] });
+
+      // Snapshot the previous value
+      const previousMessages = queryClient.getQueryData(["/api/customers", customerId, "messages"]);
+
+      // Optimistically update to show user's message immediately
+      const optimisticMessage = {
+        id: `temp-${Date.now()}`,
+        customerId,
+        sender: "accountant" as const,
+        content,
+        createdAt: new Date().toISOString(),
+      };
+
+      queryClient.setQueryData(
+        ["/api/customers", customerId, "messages"],
+        (old: any[] = []) => [...old, optimisticMessage]
+      );
+
+      // Return context with previous messages for potential rollback
+      return { previousMessages };
+    },
     onSuccess: () => {
+      // Invalidate to fetch the real messages (including AI response)
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "details"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId] });
+    },
+    onError: (_err, _variables, context) => {
+      // Rollback to previous messages on error
+      if (context?.previousMessages) {
+        queryClient.setQueryData(
+          ["/api/customers", customerId, "messages"],
+          context.previousMessages
+        );
+      }
     },
   });
 
@@ -176,6 +211,7 @@ export default function CustomerDetail() {
             onSendMessage={handleSendMessage}
             onFileUpload={handleFileUpload}
             isUploading={uploadFilesMutation.isPending}
+            isAiThinking={sendMessageMutation.isPending}
           />
           <div ref={messagesEndRef} />
         </div>

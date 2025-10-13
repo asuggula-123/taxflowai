@@ -17,6 +17,7 @@ interface ChatInterfaceProps {
   onSendMessage?: (message: string) => void;
   onFileUpload?: (files: FileList) => void;
   isUploading?: boolean;
+  isAiThinking?: boolean;
 }
 
 export function ChatInterface({
@@ -24,6 +25,7 @@ export function ChatInterface({
   onSendMessage,
   onFileUpload,
   isUploading = false,
+  isAiThinking = false,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -88,6 +90,18 @@ export function ChatInterface({
               </div>
             </div>
           ))}
+          {isAiThinking && (
+            <div className="flex justify-start" data-testid="ai-thinking-indicator">
+              <div className="max-w-[80%] space-y-1 items-start flex flex-col">
+                <Card className="p-3 bg-card">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">AI is thinking...</p>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
 
