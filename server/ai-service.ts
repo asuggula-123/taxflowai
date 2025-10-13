@@ -66,25 +66,46 @@ export async function analyzeDocument(
             },
             {
               type: "input_text",
-              text: `You are an expert tax preparation assistant. Analyze this tax document and extract all relevant information.
+              text: `You are an expert tax preparation assistant. Analyze this tax document and extract SPECIFIC, DETAILED information.
 
 Based on the ACTUAL DOCUMENT CONTENT:
-1. Identify the specific form type (Form 1040, W-2, 1099, Schedule C, etc.)
-2. Extract all relevant customer details:
-   - For Form 1040: Filing status, taxpayer names, SSN (last 4 digits only), address, tax year
-   - For W-2: Employer name, employee name, wages, federal tax withheld
-   - For 1099: Payer name, recipient name, income type, amount
-   - For any form: Any other relevant tax information
 
-Provide SPECIFIC, CONFIDENT feedback based on what you actually see in the document.
+1. Identify the exact form type and tax year
+2. Extract DETAILED information with SPECIFIC NAMES and AMOUNTS:
+   
+   For Form 1040 (Tax Return):
+   - Personal info: Taxpayer names, filing status, address, SSN (last 4 digits only)
+   - Income sources: Extract EACH employer/payer name with amounts from:
+     * W-2 wages (line 1): List each employer separately
+     * 1099 income types (lines 2-9): Specify which types (1099-NEC, 1099-MISC, 1099-INT, etc.)
+     * Business income (Schedule C): Note business name/type
+     * Other income sources shown
+   - Deductions: Itemized vs standard, specific deductions claimed
+   - Tax year and filing period
+   
+   For W-2:
+   - Employer name (Box b)
+   - Employee name
+   - Wages and withholding amounts
+   - Tax year
+   
+   For 1099 forms:
+   - Payer name (Box 1)
+   - Type of 1099 (NEC, MISC, INT, DIV, etc.)
+   - Income amounts
+   - Tax year
+
+Be SPECIFIC with names, amounts, and types. For example:
+- Good: "W-2 income from Google LLC ($85,000) and Meta Platforms Inc ($12,000)"
+- Bad: "W-2 income from employers"
 
 Respond in JSON format:
 {
   "isValid": true,
-  "documentType": "exact form name (e.g., 'Form 1040', 'Form W-2', 'Form 1099-MISC')",
-  "missingInfo": ["list any missing or unclear information"],
-  "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "actual value from document"}],
-  "feedback": "specific confirmation of what you found - reference actual details you extracted"
+  "documentType": "exact form name with year (e.g., 'Form 1040 (2023)', 'Form W-2 (2024)')",
+  "missingInfo": ["list any missing information"],
+  "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label with specific names", "value": "actual value from document with amounts/details"}],
+  "feedback": "specific confirmation mentioning actual employer names, income types, and amounts you found"
 }`
             }
           ]
@@ -169,25 +190,46 @@ export async function determineNextSteps(
   const completedDocs = documents.filter((d) => d.status === "completed");
   const requestedDocs = documents.filter((d) => d.status === "requested");
 
-  const prompt = `You are a tax preparation assistant. Analyze the current state and determine next steps.
+  // Organize details by category for better analysis
+  const detailsByCategory = details.reduce((acc, detail) => {
+    if (!acc[detail.category]) {
+      acc[detail.category] = [];
+    }
+    acc[detail.category].push(`${detail.label}: ${detail.value}`);
+    return acc;
+  }, {} as Record<string, string[]>);
 
-Current documents completed: ${completedDocs.map((d) => d.name).join(", ") || "None"}
-Documents still requested: ${requestedDocs.map((d) => d.name).join(", ") || "None"}
-Customer details collected: ${details.filter((d) => d.value).length} fields filled
+  const detailsSummary = Object.entries(detailsByCategory)
+    .map(([category, items]) => `${category}:\n  - ${items.join("\n  - ")}`)
+    .join("\n\n");
 
-For a complete US tax return, we typically need:
-- Last year's tax return (2023)
-- W2 forms from all employers
-- 1099 forms (if applicable)
-- Business income/expense records (if self-employed)
-- Deduction documentation (mortgage interest, charitable donations, etc.)
-- Personal information (SSN, filing status, dependents)
+  const prompt = `You are a tax preparation assistant. Based on the ACTUAL TAX RETURN ANALYSIS, determine what SPECIFIC documents are still needed.
+
+COMPLETED DOCUMENTS:
+${completedDocs.map((d) => d.name).join("\n") || "None yet"}
+
+ALREADY REQUESTED DOCUMENTS:
+${requestedDocs.map((d) => d.name).join("\n") || "None"}
+
+INFORMATION EXTRACTED FROM TAX RETURN:
+${detailsSummary || "No tax return uploaded yet"}
+
+INSTRUCTIONS:
+1. Analyze what income sources, deductions, and other items are shown in the extracted tax return details
+2. Request SPECIFIC documents for those exact items (not generic categories)
+3. Examples of SPECIFIC requests:
+   - If W-2 income from "ABC Corp" is shown → request "W-2 from ABC Corp for 2024"
+   - If 1099-NEC income shown → request "1099-NEC forms for 2024"
+   - If Schedule C business income shown → request "Schedule C business income/expense records for 2024"
+   - If specific deductions shown → request those exact supporting documents
+
+DO NOT request generic "as applicable" documents. Only request documents for items that are SPECIFICALLY shown in the tax return or that are standard follow-up documents for items found.
 
 Respond in JSON format:
 {
-  "missingDocuments": ["array of specific documents still needed"],
+  "missingDocuments": ["array of SPECIFIC documents with exact names/sources when known"],
   "isComplete": boolean (true only if ALL necessary documents are collected),
-  "message": "friendly message to the accountant about what's needed next or confirmation that everything is ready",
+  "message": "friendly message to the accountant about what's needed next",
   "customerStatus": "Not Started" | "Incomplete" | "Ready"
 }`;
 
@@ -197,7 +239,7 @@ Respond in JSON format:
       messages: [
         {
           role: "system",
-          content: "You are an expert tax preparation assistant helping accountants track document collection progress.",
+          content: "You are an expert tax preparation assistant. Your job is to request SPECIFIC documents based on what you find in the tax return, not generic categories. Be precise and actionable.",
         },
         { role: "user", content: prompt },
       ],
