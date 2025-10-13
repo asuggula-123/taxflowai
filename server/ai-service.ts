@@ -13,16 +13,29 @@ interface TaxEntities {
     wages: number;
     year: number;
   }>;
-  form1099Types?: string[]; // e.g., ["1099-NEC", "1099-INT"]
   form1099Payers?: Array<{
     name: string;
-    type: string; // e.g., "1099-NEC"
+    type: string; // e.g., "1099-NEC", "1099-INT", "1099-DIV", "1099-R", "SSA-1099"
     amount: number;
     year: number;
   }>;
   scheduleC?: {
     businessName: string;
     hasIncome: boolean;
+    year: number;
+  };
+  scheduleE?: {
+    propertyAddress?: string;
+    hasRentalIncome: boolean;
+    year: number;
+  };
+  formK1?: Array<{
+    entityName: string;
+    entityType: string; // "Partnership", "S-Corp", "Estate", "Trust"
+    year: number;
+  }>;
+  form1098?: {
+    lenderName?: string;
     year: number;
   };
   personalInfo?: {
@@ -100,16 +113,31 @@ Based on the ACTUAL DOCUMENT CONTENT, extract structured data:
 
 For Form 1040 (Tax Return):
 - Extract EACH W-2 employer as separate object with name, wages, year
-- Extract EACH 1099 payer with type (1099-NEC, 1099-INT, etc.), payer name, amount, year
-- Extract Schedule C business info if present
+- Extract EACH 1099 payer with specific type (1099-NEC, 1099-INT, 1099-DIV, 1099-R, SSA-1099, etc.), payer name, amount, year
+- Extract Schedule C business info if present (business name, year)
+- Extract Schedule E rental property info if present (property address, year)
+- Extract K-1 info if present (entity name, type: Partnership/S-Corp/Estate/Trust, year)
+- Extract Form 1098 mortgage interest if present (lender name, year)
 - Extract personal info (taxpayer name, filing status, tax year)
 - Extract itemized deductions if applicable
 
 For W-2:
 - Extract employer as single employer object
 
-For 1099:
-- Extract as single 1099 payer object
+For 1099 (all types):
+- Extract as single form1099Payers object with specific type (1099-NEC, 1099-INT, etc.)
+
+For Schedule C:
+- Extract as scheduleC object
+
+For Schedule E:
+- Extract as scheduleE object
+
+For K-1:
+- Extract as formK1 array item
+
+For 1098:
+- Extract as form1098 object
 
 CRITICAL: Extract actual entities found in the document, not generic categories.
 
@@ -122,6 +150,9 @@ Respond in JSON format:
     "employers": [{"name": "Google LLC", "wages": 85000, "year": 2024}],
     "form1099Payers": [{"name": "Stripe Inc", "type": "1099-NEC", "amount": 15000, "year": 2024}],
     "scheduleC": {"businessName": "Acme Consulting", "hasIncome": true, "year": 2024},
+    "scheduleE": {"propertyAddress": "123 Main St", "hasRentalIncome": true, "year": 2024},
+    "formK1": [{"entityName": "ABC Partnership", "entityType": "Partnership", "year": 2024}],
+    "form1098": {"lenderName": "Chase Bank", "year": 2024},
     "personalInfo": {"taxpayerName": "John Doe", "filingStatus": "Married Filing Jointly", "taxYear": 2023},
     "itemizedDeductions": ["mortgage interest", "charitable donations"]
   },
@@ -150,13 +181,114 @@ IMPORTANT: Only include entity fields that are actually found in the document. L
       }
     }
 
-    // Store extracted entities as a special detail record
+    // Merge new entities with existing ones (accumulate across uploads)
     if (analysis.entities) {
+      const existingEntitiesDetail = (await storage.getCustomerDetails(customerId))
+        .find(d => d.category === "TaxEntities" && d.label === "StructuredEntities");
+      
+      // Start with existing entities to preserve all data, then overlay new data
+      let mergedEntities: TaxEntities = {};
+      
+      if (existingEntitiesDetail && existingEntitiesDetail.value) {
+        try {
+          const existingEntities: TaxEntities = JSON.parse(existingEntitiesDetail.value);
+          
+          // Deep clone existing entities as the starting point
+          mergedEntities = {
+            employers: existingEntities.employers ? [...existingEntities.employers] : undefined,
+            form1099Payers: existingEntities.form1099Payers ? [...existingEntities.form1099Payers] : undefined,
+            formK1: existingEntities.formK1 ? [...existingEntities.formK1] : undefined,
+            itemizedDeductions: existingEntities.itemizedDeductions ? [...existingEntities.itemizedDeductions] : undefined,
+            scheduleC: existingEntities.scheduleC,
+            scheduleE: existingEntities.scheduleE,
+            form1098: existingEntities.form1098,
+            personalInfo: existingEntities.personalInfo,
+          };
+          
+          // Now overlay new entities from the AI analysis
+          // Merge employers (avoid duplicates by name+year)
+          if (analysis.entities.employers && analysis.entities.employers.length > 0) {
+            type Employer = { name: string; wages: number; year: number };
+            const employersMap = new Map<string, Employer>();
+            
+            // Start with existing
+            (mergedEntities.employers || []).forEach(emp => {
+              employersMap.set(`${emp.name}-${emp.year}`, emp);
+            });
+            
+            // Add new
+            analysis.entities.employers.forEach(emp => {
+              employersMap.set(`${emp.name}-${emp.year}`, emp);
+            });
+            
+            mergedEntities.employers = Array.from(employersMap.values());
+          }
+          
+          // Merge 1099 payers (avoid duplicates by name+type+year)
+          if (analysis.entities.form1099Payers && analysis.entities.form1099Payers.length > 0) {
+            type Payer = { name: string; type: string; amount: number; year: number };
+            const payersMap = new Map<string, Payer>();
+            
+            // Start with existing
+            (mergedEntities.form1099Payers || []).forEach(payer => {
+              payersMap.set(`${payer.name}-${payer.type}-${payer.year}`, payer);
+            });
+            
+            // Add new
+            analysis.entities.form1099Payers.forEach(payer => {
+              payersMap.set(`${payer.name}-${payer.type}-${payer.year}`, payer);
+            });
+            
+            mergedEntities.form1099Payers = Array.from(payersMap.values());
+          }
+          
+          // Merge K-1 forms (avoid duplicates by entity name+type+year)
+          if (analysis.entities.formK1 && analysis.entities.formK1.length > 0) {
+            type K1 = { entityName: string; entityType: string; year: number };
+            const k1Map = new Map<string, K1>();
+            
+            // Start with existing
+            (mergedEntities.formK1 || []).forEach(k1 => {
+              k1Map.set(`${k1.entityName}-${k1.entityType}-${k1.year}`, k1);
+            });
+            
+            // Add new
+            analysis.entities.formK1.forEach(k1 => {
+              k1Map.set(`${k1.entityName}-${k1.entityType}-${k1.year}`, k1);
+            });
+            
+            mergedEntities.formK1 = Array.from(k1Map.values());
+          }
+          
+          // Merge itemized deductions (avoid duplicates)
+          if (analysis.entities.itemizedDeductions && analysis.entities.itemizedDeductions.length > 0) {
+            const deductionsSet = new Set([
+              ...(mergedEntities.itemizedDeductions || []),
+              ...analysis.entities.itemizedDeductions
+            ]);
+            mergedEntities.itemizedDeductions = Array.from(deductionsSet);
+          }
+          
+          // Use latest personal info, Schedule C, Schedule E, and Form 1098 (don't merge these)
+          mergedEntities.personalInfo = analysis.entities.personalInfo || existingEntities.personalInfo;
+          mergedEntities.scheduleC = analysis.entities.scheduleC || existingEntities.scheduleC;
+          mergedEntities.scheduleE = analysis.entities.scheduleE || mergedEntities.scheduleE;
+          mergedEntities.form1098 = analysis.entities.form1098 || mergedEntities.form1098;
+        } catch (error) {
+          console.error("Error merging entities:", error);
+          // On error, fall back to just the new entities
+          mergedEntities = analysis.entities;
+        }
+      } else {
+        // First upload - just use the new entities
+        mergedEntities = analysis.entities;
+      }
+      
       await storage.upsertCustomerDetail({
         customerId,
         category: "TaxEntities",
         label: "StructuredEntities",
-        value: JSON.stringify(analysis.entities),
+        value: JSON.stringify(mergedEntities),
       });
     }
 
@@ -237,14 +369,32 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): string[] {
     requests.push(`Schedule C business records for ${entities.scheduleC.businessName} (${entities.scheduleC.year})`);
   }
 
+  // Generate Schedule E request if rental income exists
+  if (entities.scheduleE && entities.scheduleE.hasRentalIncome) {
+    const property = entities.scheduleE.propertyAddress || 'rental property';
+    requests.push(`Schedule E rental income/expense records for ${property} (${entities.scheduleE.year})`);
+  }
+
+  // Generate K-1 requests for each entity
+  if (entities.formK1 && entities.formK1.length > 0) {
+    entities.formK1.forEach(k1 => {
+      requests.push(`Form K-1 from ${k1.entityName} (${k1.entityType}) for ${k1.year}`);
+    });
+  }
+
+  // Generate Form 1098 request if mortgage interest exists
+  if (entities.form1098) {
+    const lender = entities.form1098.lenderName || 'mortgage lender';
+    requests.push(`Form 1098 (Mortgage Interest) from ${lender} for ${entities.form1098.year}`);
+  }
+
   // Generate itemized deduction requests
   if (entities.itemizedDeductions && entities.itemizedDeductions.length > 0) {
     entities.itemizedDeductions.forEach(deduction => {
-      if (deduction.toLowerCase().includes('mortgage')) {
-        requests.push(`Form 1098 (Mortgage Interest Statement) for ${entities.personalInfo?.taxYear || 'current year'}`);
-      } else if (deduction.toLowerCase().includes('charitable')) {
+      if (deduction.toLowerCase().includes('charitable')) {
         requests.push(`Charitable donation receipts for ${entities.personalInfo?.taxYear || 'current year'}`);
-      } else {
+      } else if (!deduction.toLowerCase().includes('mortgage')) {
+        // Skip mortgage interest if we already have form1098
         requests.push(`${deduction} documentation for ${entities.personalInfo?.taxYear || 'current year'}`);
       }
     });
@@ -277,14 +427,115 @@ export async function determineNextSteps(
   // Generate specific document requests from entities
   const requiredDocuments = generateDocumentRequestsFromEntities(entities);
 
-  // Filter out already completed documents
-  const completedDocNames = new Set(completedDocs.map(d => d.name.toLowerCase()));
-  const missingDocuments = requiredDocuments.filter(req => {
-    // Simple check: if any completed doc contains the main identifier
-    return !Array.from(completedDocNames).some(completed => 
-      completed.includes(req.toLowerCase().split(' ')[0])
-    );
-  });
+  // Helper to check if a request is satisfied by completed documents
+  const isRequestSatisfied = (request: string, completedDocs: Document[]): boolean => {
+    const reqLower = request.toLowerCase();
+    
+    // Extract key components from request
+    const isW2 = reqLower.includes('w-2') || reqLower.includes('w2');
+    const is1099 = reqLower.includes('1099');
+    const isScheduleC = reqLower.includes('schedule c');
+    const isScheduleE = reqLower.includes('schedule e');
+    const isK1 = reqLower.includes('k-1') || reqLower.includes('k1');
+    const is1098 = reqLower.includes('1098');
+    
+    // Extract employer/payer name from request (between "from" and "for")
+    const fromMatch = reqLower.match(/from\s+(.+?)\s+for/);
+    const entityName = fromMatch ? fromMatch[1].toLowerCase() : '';
+    
+    // Extract full form type for 1099s (e.g., "1099-NEC", "SSA-1099")
+    const form1099TypeMatch = reqLower.match(/(ssa-1099|1099-[a-z]+)/);
+    const form1099Type = form1099TypeMatch ? form1099TypeMatch[1] : '';
+    
+    return completedDocs.some(doc => {
+      const docLower = doc.name.toLowerCase();
+      
+      // W-2 matching
+      if (isW2) {
+        const hasW2 = docLower.includes('w-2') || docLower.includes('w2');
+        if (!hasW2) return false;
+        
+        // If we have an entity name, check for it in the filename
+        if (entityName) {
+          // Check if any significant word from entity name appears in filename
+          const entityWords = entityName.split(/\s+/).filter(w => w.length > 2);
+          return entityWords.some(word => docLower.includes(word));
+        }
+        return true;
+      }
+      
+      // 1099 matching
+      if (is1099) {
+        // Handle SSA-1099 specifically
+        if (form1099Type === 'ssa-1099') {
+          const hasSSA = docLower.includes('ssa-1099') || 
+                         docLower.includes('ssa1099') || 
+                         (docLower.includes('ssa') && docLower.includes('1099'));
+          if (!hasSSA) return false;
+        } else {
+          const has1099 = docLower.includes('1099');
+          if (!has1099) return false;
+          
+          // Check for specific 1099 type if specified (e.g., "1099-nec", "1099nec")
+          if (form1099Type) {
+            // Extract the subtype (e.g., "nec" from "1099-nec")
+            const subtypeMatch = form1099Type.match(/1099-([a-z]+)/);
+            if (subtypeMatch) {
+              const subtype = subtypeMatch[1];
+              // Match "1099-NEC", "1099NEC", or "1099_NEC" patterns
+              const hasType = docLower.includes(`1099-${subtype}`) || 
+                             docLower.includes(`1099${subtype}`) ||
+                             docLower.includes(`1099_${subtype}`);
+              if (!hasType) return false;
+            }
+          }
+        }
+        
+        // Check for entity name
+        if (entityName) {
+          const entityWords = entityName.split(/\s+/).filter(w => w.length > 2);
+          return entityWords.some(word => docLower.includes(word));
+        }
+        return true;
+      }
+      
+      // Schedule C matching
+      if (isScheduleC) {
+        return docLower.includes('schedule') && docLower.includes('c');
+      }
+      
+      // Schedule E matching
+      if (isScheduleE) {
+        return docLower.includes('schedule') && docLower.includes('e');
+      }
+      
+      // K-1 matching
+      if (isK1) {
+        const hasK1 = docLower.includes('k-1') || docLower.includes('k1');
+        if (!hasK1) return false;
+        
+        // Check for entity name if specified
+        if (entityName) {
+          const entityWords = entityName.split(/\s+/).filter(w => w.length > 2);
+          return entityWords.some(word => docLower.includes(word));
+        }
+        return true;
+      }
+      
+      // Form 1098 matching
+      if (is1098) {
+        return docLower.includes('1098');
+      }
+      
+      // Generic matching for other types
+      return false;
+    });
+  };
+
+  // Filter out already satisfied requests
+  const missingDocuments = requiredDocuments.filter(req => 
+    !isRequestSatisfied(req, completedDocs)
+  );
 
   // Determine completion status
   const isComplete = missingDocuments.length === 0 && requiredDocuments.length > 0;
