@@ -18,6 +18,7 @@ interface ChatInterfaceProps {
   onFileUpload?: (files: FileList) => void;
   isUploading?: boolean;
   isAiThinking?: boolean;
+  customerStatus?: "Awaiting Tax Return" | "Incomplete" | "Ready";
 }
 
 export function ChatInterface({
@@ -26,13 +27,16 @@ export function ChatInterface({
   onFileUpload,
   isUploading = false,
   isAiThinking = false,
+  customerStatus,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isChatDisabled = customerStatus === "Awaiting Tax Return";
+
   const handleSend = () => {
-    if (input.trim()) {
+    if (input.trim() && !isChatDisabled) {
       onSendMessage?.(input);
       setInput("");
     }
@@ -156,29 +160,37 @@ export function ChatInterface({
           />
         </div>
 
-        <div className="flex gap-2">
-          <Textarea
-            placeholder="Add customer details or ask a question..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            className="resize-none min-h-[60px]"
-            data-testid="input-chat-message"
-          />
-          <Button
-            onClick={handleSend}
-            size="icon"
-            disabled={!input.trim()}
-            data-testid="button-send-message"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
+        {isChatDisabled ? (
+          <div className="p-4 border-2 border-dashed rounded-md bg-muted/30" data-testid="chat-disabled-message">
+            <p className="text-sm text-muted-foreground text-center">
+              Chat is disabled until you upload and validate the customer's 2023 tax return.
+            </p>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Textarea
+              placeholder="Add customer details or ask a question..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              className="resize-none min-h-[60px]"
+              data-testid="input-chat-message"
+            />
+            <Button
+              onClick={handleSend}
+              size="icon"
+              disabled={!input.trim()}
+              data-testid="button-send-message"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

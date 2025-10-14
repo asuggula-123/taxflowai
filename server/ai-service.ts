@@ -691,15 +691,22 @@ export async function determineNextSteps(
   };
 }
 
+interface ChatResponseResult {
+  message: string;
+  requestedDocuments: string[];
+}
+
 export async function generateChatResponse(
   userMessage: string,
   customerId: string
-): Promise<string> {
+): Promise<ChatResponseResult> {
+  const customer = await storage.getCustomer(customerId);
   const documents = await storage.getDocumentsByCustomer(customerId);
   const details = await storage.getCustomerDetails(customerId);
   const messages = await storage.getChatMessagesByCustomer(customerId);
 
   const context = `
+Customer: ${customer?.name}
 Documents: ${documents.map((d) => `${d.name} (${d.status})`).join(", ")}
 Customer Details: ${details.filter((d) => d.value).map((d) => `${d.label}: ${d.value}`).join(", ")}
 Recent conversation: ${messages.slice(-5).map((m) => `${m.sender}: ${m.content}`).join("\n")}
@@ -710,7 +717,24 @@ Recent conversation: ${messages.slice(-5).map((m) => `${m.sender}: ${m.content}`
 Current context:
 ${context}
 
-Provide a helpful, concise response. If they're providing information, acknowledge it and update your understanding. If they're asking a question, answer it based on tax preparation best practices.`;
+Your task:
+1. Acknowledge the accountant's message and provide a helpful response
+2. Based on the conversation, determine if any NEW tax documents should be requested
+3. Return ONLY specific, named document requests (e.g., "W-2 from Google for 2023", "1099-NEC from Meta for 2023")
+4. Do NOT request documents that are already in the document list above
+5. Only request documents if the accountant's message suggests additional tax obligations
+
+Respond in this exact JSON format:
+{
+  "message": "Your conversational response to the accountant",
+  "requestedDocuments": ["Specific Document Name 1", "Specific Document Name 2"]
+}
+
+IMPORTANT: The requestedDocuments array should be empty [] unless the conversation reveals NEW tax obligations. Examples:
+- If accountant says "They also worked at Microsoft in 2023" → request W-2 from Microsoft
+- If accountant says "They received a 1099 from Stripe" → request 1099 from Stripe
+- If accountant just asks a question or provides general info → return empty array
+`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -718,15 +742,25 @@ Provide a helpful, concise response. If they're providing information, acknowled
       messages: [
         {
           role: "system",
-          content: "You are a friendly, professional tax preparation assistant helping accountants collect tax documents and information.",
+          content: "You are a professional tax preparation assistant. Respond ONLY with valid JSON in the exact format requested.",
         },
         { role: "user", content: prompt },
       ],
+      response_format: { type: "json_object" },
     });
 
-    return response.choices[0].message.content || "I'm here to help!";
+    const content = response.choices[0].message.content || "{}";
+    const parsed = JSON.parse(content);
+    
+    return {
+      message: parsed.message || "I'm here to help!",
+      requestedDocuments: Array.isArray(parsed.requestedDocuments) ? parsed.requestedDocuments : [],
+    };
   } catch (error) {
     console.error("Error generating chat response:", error);
-    return "I understand. Please continue with the document upload process.";
+    return {
+      message: "I understand. Please continue with the document upload process.",
+      requestedDocuments: [],
+    };
   }
 }

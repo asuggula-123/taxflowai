@@ -321,6 +321,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/customers/:customerId/messages", async (req, res) => {
     try {
+      // Check customer status before allowing chat
+      const customer = await storage.getCustomer(req.params.customerId);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+
+      // Enforce workflow gate: chat is only available after tax return validation
+      if (customer.status === "Awaiting Tax Return") {
+        return res.status(403).json({ 
+          error: "Chat is disabled. Please upload and validate the customer's 2023 tax return first." 
+        });
+      }
+
       const validatedData = insertChatMessageSchema.parse({
         ...req.body,
         customerId: req.params.customerId,
@@ -329,13 +342,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create accountant message
       const message = await storage.createChatMessage(validatedData);
 
-      // Generate AI response
-      const aiResponseContent = await generateChatResponse(validatedData.content, req.params.customerId);
+      // Generate AI response (returns structured data with message and requested documents)
+      const aiResponse = await generateChatResponse(validatedData.content, req.params.customerId);
       const aiMessage = await storage.createChatMessage({
         customerId: req.params.customerId,
         sender: "ai",
-        content: aiResponseContent,
+        content: aiResponse.message,
       });
+
+      // Create requested document entities if any
+      if (aiResponse.requestedDocuments.length > 0) {
+        // Get all existing documents to check for duplicates
+        const allExistingDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+        
+        for (const docName of aiResponse.requestedDocuments) {
+          // Check if a document with this name already exists (in any status)
+          const alreadyExists = allExistingDocs.some((d) => d.name === docName);
+          
+          if (!alreadyExists) {
+            await storage.createDocument({
+              customerId: req.params.customerId,
+              name: docName,
+              status: "requested",
+            });
+          }
+        }
+      }
 
       res.status(201).json({ message, aiMessage });
     } catch (error) {

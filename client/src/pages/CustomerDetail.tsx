@@ -217,6 +217,7 @@ export default function CustomerDetail() {
             onFileUpload={handleFileUpload}
             isUploading={uploadFilesMutation.isPending}
             isAiThinking={sendMessageMutation.isPending}
+            customerStatus={customer.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
           />
           <div ref={messagesEndRef} />
         </div>
