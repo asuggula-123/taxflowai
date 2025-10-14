@@ -1,6 +1,8 @@
 import {
   type Customer,
   type InsertCustomer,
+  type TaxYearIntake,
+  type InsertTaxYearIntake,
   type Document,
   type InsertDocument,
   type ChatMessage,
@@ -15,33 +17,41 @@ export interface IStorage {
   getCustomers(): Promise<Customer[]>;
   getCustomer(id: string): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
-  updateCustomerStatus(id: string, status: string): Promise<Customer | undefined>;
   deleteCustomer(id: string): Promise<boolean>;
 
+  // Tax year intake operations
+  getIntakesByCustomer(customerId: string): Promise<TaxYearIntake[]>;
+  getIntake(id: string): Promise<TaxYearIntake | undefined>;
+  createIntake(intake: InsertTaxYearIntake): Promise<TaxYearIntake>;
+  updateIntakeStatus(id: string, status: string): Promise<TaxYearIntake | undefined>;
+  deleteIntake(id: string): Promise<boolean>;
+
   // Document operations
-  getDocumentsByCustomer(customerId: string): Promise<Document[]>;
+  getDocumentsByIntake(intakeId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
-  updateDocument(id: string, updates: Partial<Omit<Document, 'id' | 'customerId' | 'createdAt'>>): Promise<Document | undefined>;
+  updateDocument(id: string, updates: Partial<Omit<Document, 'id' | 'intakeId' | 'createdAt'>>): Promise<Document | undefined>;
   updateDocumentStatus(id: string, status: string, filePath?: string, name?: string): Promise<Document | undefined>;
   deleteDocument(id: string): Promise<boolean>;
 
   // Chat message operations
-  getChatMessagesByCustomer(customerId: string): Promise<ChatMessage[]>;
+  getChatMessagesByIntake(intakeId: string): Promise<ChatMessage[]>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
 
   // Customer detail operations
-  getCustomerDetails(customerId: string): Promise<CustomerDetail[]>;
+  getCustomerDetailsByIntake(intakeId: string): Promise<CustomerDetail[]>;
   upsertCustomerDetail(detail: InsertCustomerDetail): Promise<CustomerDetail>;
 }
 
 export class MemStorage implements IStorage {
   private customers: Map<string, Customer>;
+  private taxYearIntakes: Map<string, TaxYearIntake>;
   private documents: Map<string, Document>;
   private chatMessages: Map<string, ChatMessage>;
   private customerDetails: Map<string, CustomerDetail>;
 
   constructor() {
     this.customers = new Map();
+    this.taxYearIntakes = new Map();
     this.documents = new Map();
     this.chatMessages = new Map();
     this.customerDetails = new Map();
@@ -62,7 +72,6 @@ export class MemStorage implements IStorage {
     const customer: Customer = {
       ...insertCustomer,
       id,
-      status: "Awaiting Tax Return",
       createdAt: new Date(),
     };
     this.customers.set(id, customer);
@@ -70,43 +79,85 @@ export class MemStorage implements IStorage {
     return customer;
   }
 
-  async updateCustomerStatus(id: string, status: string): Promise<Customer | undefined> {
-    const customer = this.customers.get(id);
-    if (!customer) return undefined;
-    
-    const updated = { ...customer, status };
-    this.customers.set(id, updated);
-    return updated;
-  }
-
   async deleteCustomer(id: string): Promise<boolean> {
     const customer = this.customers.get(id);
     if (!customer) return false;
 
-    // Delete all related data
-    this.customers.delete(id);
+    // Get all intakes for this customer
+    const intakes = Array.from(this.taxYearIntakes.values())
+      .filter((i) => i.customerId === id);
     
-    // Delete all documents for this customer
+    // Delete all intakes and their related data
+    for (const intake of intakes) {
+      await this.deleteIntake(intake.id);
+    }
+    
+    // Delete the customer
+    this.customers.delete(id);
+
+    return true;
+  }
+
+  async getIntakesByCustomer(customerId: string): Promise<TaxYearIntake[]> {
+    return Array.from(this.taxYearIntakes.values())
+      .filter((i) => i.customerId === customerId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getIntake(id: string): Promise<TaxYearIntake | undefined> {
+    return this.taxYearIntakes.get(id);
+  }
+
+  async createIntake(insertIntake: InsertTaxYearIntake): Promise<TaxYearIntake> {
+    const id = randomUUID();
+    const intake: TaxYearIntake = {
+      ...insertIntake,
+      id,
+      status: "Awaiting Tax Return",
+      notes: insertIntake.notes || null,
+      createdAt: new Date(),
+    };
+    this.taxYearIntakes.set(id, intake);
+    return intake;
+  }
+
+  async updateIntakeStatus(id: string, status: string): Promise<TaxYearIntake | undefined> {
+    const intake = this.taxYearIntakes.get(id);
+    if (!intake) return undefined;
+    
+    const updated = { ...intake, status };
+    this.taxYearIntakes.set(id, updated);
+    return updated;
+  }
+
+  async deleteIntake(id: string): Promise<boolean> {
+    const intake = this.taxYearIntakes.get(id);
+    if (!intake) return false;
+
+    // Delete all related data
+    this.taxYearIntakes.delete(id);
+    
+    // Delete all documents for this intake
     Array.from(this.documents.values())
-      .filter((d) => d.customerId === id)
+      .filter((d) => d.intakeId === id)
       .forEach((d) => this.documents.delete(d.id));
     
-    // Delete all chat messages for this customer
+    // Delete all chat messages for this intake
     Array.from(this.chatMessages.values())
-      .filter((m) => m.customerId === id)
+      .filter((m) => m.intakeId === id)
       .forEach((m) => this.chatMessages.delete(m.id));
     
-    // Delete all customer details
+    // Delete all customer details for this intake
     Array.from(this.customerDetails.values())
-      .filter((d) => d.customerId === id)
+      .filter((d) => d.intakeId === id)
       .forEach((d) => this.customerDetails.delete(d.id));
 
     return true;
   }
 
-  async getDocumentsByCustomer(customerId: string): Promise<Document[]> {
+  async getDocumentsByIntake(intakeId: string): Promise<Document[]> {
     return Array.from(this.documents.values())
-      .filter((d) => d.customerId === customerId)
+      .filter((d) => d.intakeId === intakeId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
@@ -120,6 +171,7 @@ export class MemStorage implements IStorage {
       documentType: insertDocument.documentType || null,
       year: insertDocument.year || null,
       entity: insertDocument.entity || null,
+      provenance: insertDocument.provenance || null,
       createdAt: new Date(),
     };
     this.documents.set(id, document);
@@ -128,7 +180,7 @@ export class MemStorage implements IStorage {
 
   async updateDocument(
     id: string,
-    updates: Partial<Omit<Document, 'id' | 'customerId' | 'createdAt'>>
+    updates: Partial<Omit<Document, 'id' | 'intakeId' | 'createdAt'>>
   ): Promise<Document | undefined> {
     const document = this.documents.get(id);
     if (!document) return undefined;
@@ -165,9 +217,9 @@ export class MemStorage implements IStorage {
     return true;
   }
 
-  async getChatMessagesByCustomer(customerId: string): Promise<ChatMessage[]> {
+  async getChatMessagesByIntake(intakeId: string): Promise<ChatMessage[]> {
     return Array.from(this.chatMessages.values())
-      .filter((m) => m.customerId === customerId)
+      .filter((m) => m.intakeId === intakeId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
@@ -182,17 +234,17 @@ export class MemStorage implements IStorage {
     return message;
   }
 
-  async getCustomerDetails(customerId: string): Promise<CustomerDetail[]> {
+  async getCustomerDetailsByIntake(intakeId: string): Promise<CustomerDetail[]> {
     return Array.from(this.customerDetails.values())
-      .filter((d) => d.customerId === customerId)
+      .filter((d) => d.intakeId === intakeId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
   async upsertCustomerDetail(insertDetail: InsertCustomerDetail): Promise<CustomerDetail> {
-    // Find existing detail with same customer, category, and label
+    // Find existing detail with same intake, category, and label
     const existing = Array.from(this.customerDetails.values()).find(
       (d) =>
-        d.customerId === insertDetail.customerId &&
+        d.intakeId === insertDetail.intakeId &&
         d.category === insertDetail.category &&
         d.label === insertDetail.label
     );

@@ -28,13 +28,21 @@ export const customers = pgTable("customers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   email: text("email").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const taxYearIntakes = pgTable("tax_year_intakes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  year: text("year").notNull(), // Tax year (e.g., "2024")
+  notes: text("notes"),
   status: text("status").notNull().default("Awaiting Tax Return"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const documents = pgTable("documents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  intakeId: varchar("intake_id").notNull().references(() => taxYearIntakes.id),
   name: text("name").notNull(),
   documentType: text("document_type"),
   year: text("year"),
@@ -47,7 +55,7 @@ export const documents = pgTable("documents", {
 
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  intakeId: varchar("intake_id").notNull().references(() => taxYearIntakes.id),
   sender: text("sender").notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -55,7 +63,7 @@ export const chatMessages = pgTable("chat_messages", {
 
 export const customerDetails = pgTable("customer_details", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  customerId: varchar("customer_id").notNull().references(() => customers.id),
+  intakeId: varchar("intake_id").notNull().references(() => taxYearIntakes.id),
   category: text("category").notNull(),
   label: text("label").notNull(),
   value: text("value"),
@@ -63,6 +71,11 @@ export const customerDetails = pgTable("customer_details", {
 });
 
 export const insertCustomerSchema = createInsertSchema(customers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertTaxYearIntakeSchema = createInsertSchema(taxYearIntakes).omit({
   id: true,
   createdAt: true,
   status: true,
@@ -85,6 +98,8 @@ export const insertCustomerDetailSchema = createInsertSchema(customerDetails).om
 
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Customer = typeof customers.$inferSelect;
+export type InsertTaxYearIntake = z.infer<typeof insertTaxYearIntakeSchema>;
+export type TaxYearIntake = typeof taxYearIntakes.$inferSelect;
 export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
