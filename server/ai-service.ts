@@ -6,37 +6,50 @@ import fs from "fs";
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Provenance information for entities
+interface Provenance {
+  page?: number;
+  lineReference?: string;
+  evidence: string;
+}
+
 // Structured entities extracted from tax documents
 interface TaxEntities {
   employers?: Array<{
     name: string;
     wages: number;
     year: number;
+    provenance?: Provenance;
   }>;
   form1099Payers?: Array<{
     name: string;
     type: string; // e.g., "1099-NEC", "1099-INT", "1099-DIV", "1099-R", "SSA-1099"
     amount: number;
     year: number;
+    provenance?: Provenance;
   }>;
   scheduleC?: {
     businessName: string;
     hasIncome: boolean;
     year: number;
+    provenance?: Provenance;
   };
   scheduleE?: {
     propertyAddress?: string;
     hasRentalIncome: boolean;
     year: number;
+    provenance?: Provenance;
   };
   formK1?: Array<{
     entityName: string;
     entityType: string; // "Partnership", "S-Corp", "Estate", "Trust"
     year: number;
+    provenance?: Provenance;
   }>;
   form1098?: {
     lenderName?: string;
     year: number;
+    provenance?: Provenance;
   };
   personalInfo?: {
     taxpayerName?: string;
@@ -71,6 +84,7 @@ export interface StructuredDocumentRequest {
   documentType: string;
   year: string;
   entity?: string;
+  provenance?: Provenance;
 }
 
 interface TaxReturnValidation {
