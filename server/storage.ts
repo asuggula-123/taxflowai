@@ -21,7 +21,9 @@ export interface IStorage {
   // Document operations
   getDocumentsByCustomer(customerId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
+  updateDocument(id: string, updates: Partial<Omit<Document, 'id' | 'customerId' | 'createdAt'>>): Promise<Document | undefined>;
   updateDocumentStatus(id: string, status: string, filePath?: string, name?: string): Promise<Document | undefined>;
+  deleteDocument(id: string): Promise<boolean>;
 
   // Chat message operations
   getChatMessagesByCustomer(customerId: string): Promise<ChatMessage[]>;
@@ -115,10 +117,25 @@ export class MemStorage implements IStorage {
       id,
       status: insertDocument.status || "requested",
       filePath: insertDocument.filePath || null,
+      documentType: insertDocument.documentType || null,
+      year: insertDocument.year || null,
+      entity: insertDocument.entity || null,
       createdAt: new Date(),
     };
     this.documents.set(id, document);
     return document;
+  }
+
+  async updateDocument(
+    id: string,
+    updates: Partial<Omit<Document, 'id' | 'customerId' | 'createdAt'>>
+  ): Promise<Document | undefined> {
+    const document = this.documents.get(id);
+    if (!document) return undefined;
+
+    const updated = { ...document, ...updates };
+    this.documents.set(id, updated);
+    return updated;
   }
 
   async updateDocumentStatus(
@@ -138,6 +155,14 @@ export class MemStorage implements IStorage {
     };
     this.documents.set(id, updated);
     return updated;
+  }
+
+  async deleteDocument(id: string): Promise<boolean> {
+    const document = this.documents.get(id);
+    if (!document) return false;
+    
+    this.documents.delete(id);
+    return true;
   }
 
   async getChatMessagesByCustomer(customerId: string): Promise<ChatMessage[]> {

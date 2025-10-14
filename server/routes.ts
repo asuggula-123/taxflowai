@@ -198,6 +198,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const matchedDocIds = new Set<string>();
 
       for (const file of files) {
+        // Analyze document with AI first
+        const analysis = await analyzeDocument(file.originalname, file.path, req.params.customerId);
+        
+        // If analysis failed, create error message and return error
+        if (!analysis.isValid) {
+          await storage.createChatMessage({
+            customerId: req.params.customerId,
+            sender: "ai",
+            content: `⚠️ Failed to analyze ${file.originalname}: ${analysis.feedback}`,
+          });
+          return res.status(400).json({ error: analysis.feedback });
+        }
+        
         const uploadTokens = normalizeToTokens(file.originalname);
         
         // Find best matching requested document from available (unmatched) requests
@@ -255,11 +268,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (document) {
           uploadedDocs.push(document);
         }
-
-        // Analyze document with AI
-        const analysis = await analyzeDocument(file.originalname, file.path, req.params.customerId);
         
-        // Create AI response message
+        // Create AI response message for successful analysis
         const aiMessage = await storage.createChatMessage({
           customerId: req.params.customerId,
           sender: "ai",
@@ -286,16 +296,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Get all existing documents to check for duplicates
         const allExistingDocs = await storage.getDocumentsByCustomer(req.params.customerId);
         
-        for (const docName of nextSteps.missingDocuments.slice(0, 3)) {
+        for (const docRequest of nextSteps.missingDocuments) {
           // Check if this requested document already exists
           const alreadyExists = allExistingDocs.some((d) => 
-            d.name === docName && d.status === "requested"
+            d.name === docRequest.name && d.status === "requested"
           );
           
           if (!alreadyExists) {
             await storage.createDocument({
               customerId: req.params.customerId,
-              name: docName,
+              name: docRequest.name,
+              documentType: docRequest.documentType,
+              year: docRequest.year,
+              entity: docRequest.entity || null,
               status: "requested",
             });
           }
@@ -306,6 +319,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Upload error:", error);
       res.status(500).json({ error: "Failed to upload documents" });
+    }
+  });
+
+  // Manual document request creation (for accountants to add documents)
+  app.post("/api/customers/:customerId/documents", async (req, res) => {
+    try {
+      const { name, documentType, year, entity } = req.body;
+      
+      if (!name || !documentType || !year) {
+        return res.status(400).json({ error: "Missing required fields: name, documentType, year" });
+      }
+
+      const document = await storage.createDocument({
+        customerId: req.params.customerId,
+        name,
+        documentType,
+        year,
+        entity: entity || null,
+        status: "requested",
+      });
+
+      res.status(201).json(document);
+    } catch (error) {
+      console.error("Create document error:", error);
+      res.status(500).json({ error: "Failed to create document" });
+    }
+  });
+
+  // Update document
+  app.patch("/api/documents/:id", async (req, res) => {
+    try {
+      const { name, documentType, year, entity } = req.body;
+      
+      const document = await storage.updateDocument(req.params.id, {
+        ...(name && { name }),
+        ...(documentType && { documentType }),
+        ...(year && { year }),
+        ...(entity !== undefined && { entity: entity || null }),
+      });
+
+      if (!document) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+
+      res.json(document);
+    } catch (error) {
+      console.error("Update document error:", error);
+      res.status(500).json({ error: "Failed to update document" });
+    }
+  });
+
+  // Delete document
+  app.delete("/api/documents/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteDocument(req.params.id);
+      
+      if (!deleted) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Delete document error:", error);
+      res.status(500).json({ error: "Failed to delete document" });
     }
   });
 
@@ -355,14 +432,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Get all existing documents to check for duplicates
         const allExistingDocs = await storage.getDocumentsByCustomer(req.params.customerId);
         
-        for (const docName of aiResponse.requestedDocuments) {
+        for (const docRequest of aiResponse.requestedDocuments) {
           // Check if a document with this name already exists (in any status)
-          const alreadyExists = allExistingDocs.some((d) => d.name === docName);
+          const alreadyExists = allExistingDocs.some((d) => d.name === docRequest.name);
           
           if (!alreadyExists) {
             await storage.createDocument({
               customerId: req.params.customerId,
-              name: docName,
+              name: docRequest.name,
+              documentType: docRequest.documentType,
+              year: docRequest.year,
+              entity: docRequest.entity || null,
               status: "requested",
             });
           }

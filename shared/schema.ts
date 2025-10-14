@@ -3,6 +3,27 @@ import { pgTable, text, varchar, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const DOCUMENT_TYPES = {
+  FORM_1040: "Form 1040",
+  W2: "W-2",
+  "1099_MISC": "1099-MISC",
+  "1099_NEC": "1099-NEC",
+  "1099_INT": "1099-INT",
+  "1099_DIV": "1099-DIV",
+  "1099_G": "1099-G",
+  "1099_R": "1099-R",
+  SCHEDULE_C: "Schedule C",
+  SCHEDULE_E: "Schedule E",
+  SCHEDULE_K1: "Schedule K-1",
+  SCHEDULE_A: "Schedule A",
+  FORM_1098: "Form 1098",
+  FORM_8949: "Form 8949",
+  FORM_2439: "Form 2439",
+  OTHER: "Other",
+} as const;
+
+export const DOCUMENT_TYPE_VALUES = Object.values(DOCUMENT_TYPES);
+
 export const customers = pgTable("customers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -15,6 +36,9 @@ export const documents = pgTable("documents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   customerId: varchar("customer_id").notNull().references(() => customers.id),
   name: text("name").notNull(),
+  documentType: text("document_type"),
+  year: text("year"),
+  entity: text("entity"),
   status: text("status").notNull().default("requested"),
   filePath: text("file_path"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

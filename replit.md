@@ -21,7 +21,9 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
   - **Chat Response Generation**: AI provides helpful responses and can create actual document entities based on chat conversations (e.g., "W-2 from Microsoft for 2023").
 - **Data Model**:
     - **Customers**: id, name, email, status, createdAt
-    - **Documents**: id, customerId, name, status, filePath, createdAt
+    - **Documents**: id, customerId, name, documentType, year, entity, status, filePath, createdAt
+      - Structured fields enable precise AI matching and visual display with pills/badges
+      - Entity field stores company/organization name (e.g., "Microsoft", "Stripe Inc")
     - **Chat Messages**: id, customerId, sender, content, createdAt
     - **Customer Details**: id, customerId, category, label, value, createdAt
 
@@ -44,6 +46,22 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 - Robust duplicate prevention for documents across uploads and chat-driven requests.
 - Optimized UI for immediate user feedback (optimistic chat, upload progress, AI thinking indicators).
 - Comprehensive error handling with clear messages.
+
+## Recent Updates (October 2025)
+
+### Entity Field Implementation
+- Added structured entity field to documents for storing company/organization names
+- Entity field properly persisted across create, update, and edit operations
+- UI displays entity as visual pill/badge when present
+- Form state syncs correctly when editing documents (useEffect-based synchronization)
+- Entity can be added, updated, or cleared (set to null) through edit dialog
+
+### Bug Fixes
+- **Routing Consistency**: Changed customer detail route from `/customer/:id` to `/customers/:id` to match API convention
+- **Entity Persistence**: Fixed critical bug where entity field was collected in UI but not persisted to database
+- **Entity Pre-population**: Fixed bug where editing a document did not pre-populate entity field, causing silent data loss
+- **Entity Clearing**: Fixed payload construction to explicitly send null when entity is cleared, ensuring badge removal
+- **Upload Error Handling**: Upload endpoint now returns 400 when AI analysis fails instead of 200, preventing invalid document creation
 
 ## External Dependencies
 - **OpenAI API**: Utilized for AI-powered document analysis (GPT-5) and chat response generation.

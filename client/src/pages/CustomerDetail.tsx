@@ -15,7 +15,7 @@ import type { CustomerDetailItem } from "@/components/CustomerDetailsPanel";
 import type { ChatMessage } from "@/components/ChatInterface";
 
 export default function CustomerDetail() {
-  const [, params] = useRoute("/customer/:id");
+  const [, params] = useRoute("/customers/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const customerId = params?.id || "";
@@ -206,6 +206,7 @@ export default function CustomerDetail() {
             <DocumentList 
               documents={documents} 
               customerStatus={customer.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
+              customerId={customerId}
             />
           </div>
           <div className="space-y-4">

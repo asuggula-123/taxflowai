@@ -60,10 +60,17 @@ interface DocumentAnalysis {
 }
 
 interface NextStepsAnalysis {
-  missingDocuments: string[];
+  missingDocuments: StructuredDocumentRequest[];
   isComplete: boolean;
   message: string;
   customerStatus: "Awaiting Tax Return" | "Incomplete" | "Ready";
+}
+
+export interface StructuredDocumentRequest {
+  name: string;
+  documentType: string;
+  year: string;
+  entity?: string;
 }
 
 interface TaxReturnValidation {
@@ -463,56 +470,87 @@ IMPORTANT: Only include entity fields that are actually found in the document. L
 }
 
 // Helper function to generate specific document requests from structured entities
-function generateDocumentRequestsFromEntities(entities: TaxEntities): string[] {
-  const requests: string[] = [];
+// If entities are from prior year (2023), request current year (2024) equivalents
+function generateDocumentRequestsFromEntities(entities: TaxEntities): StructuredDocumentRequest[] {
+  const requests: StructuredDocumentRequest[] = [];
+  
+  // Determine target year: if entities are from prior year (2023), request 2024 docs
+  const getTargetYear = (entityYear?: number): string => {
+    if (entityYear === 2023) return "2024";
+    return entityYear?.toString() || "2024";
+  };
 
   // Generate W-2 requests for each employer
   if (entities.employers && entities.employers.length > 0) {
     entities.employers.forEach(employer => {
-      requests.push(`W-2 from ${employer.name} for ${employer.year}`);
+      const targetYear = getTargetYear(employer.year);
+      requests.push({
+        name: `W-2 from ${employer.name} for ${targetYear}`,
+        documentType: "W-2",
+        year: targetYear,
+        entity: employer.name
+      });
     });
   }
 
   // Generate 1099 requests for each payer
   if (entities.form1099Payers && entities.form1099Payers.length > 0) {
     entities.form1099Payers.forEach(payer => {
-      requests.push(`${payer.type} from ${payer.name} for ${payer.year}`);
+      const targetYear = getTargetYear(payer.year);
+      requests.push({
+        name: `${payer.type} from ${payer.name} for ${targetYear}`,
+        documentType: payer.type,
+        year: targetYear,
+        entity: payer.name
+      });
     });
   }
 
   // Generate Schedule C request if business income exists
   if (entities.scheduleC && entities.scheduleC.hasIncome) {
-    requests.push(`Schedule C business records for ${entities.scheduleC.businessName} (${entities.scheduleC.year})`);
+    const targetYear = getTargetYear(entities.scheduleC.year);
+    requests.push({
+      name: `Schedule C for ${entities.scheduleC.businessName} (${targetYear})`,
+      documentType: "Schedule C",
+      year: targetYear,
+      entity: entities.scheduleC.businessName
+    });
   }
 
   // Generate Schedule E request if rental income exists
   if (entities.scheduleE && entities.scheduleE.hasRentalIncome) {
     const property = entities.scheduleE.propertyAddress || 'rental property';
-    requests.push(`Schedule E rental income/expense records for ${property} (${entities.scheduleE.year})`);
+    const targetYear = getTargetYear(entities.scheduleE.year);
+    requests.push({
+      name: `Schedule E for ${property} (${targetYear})`,
+      documentType: "Schedule E",
+      year: targetYear,
+      entity: property
+    });
   }
 
   // Generate K-1 requests for each entity
   if (entities.formK1 && entities.formK1.length > 0) {
     entities.formK1.forEach(k1 => {
-      requests.push(`Form K-1 from ${k1.entityName} (${k1.entityType}) for ${k1.year}`);
+      const targetYear = getTargetYear(k1.year);
+      requests.push({
+        name: `Schedule K-1 from ${k1.entityName} (${k1.entityType}) for ${targetYear}`,
+        documentType: "Schedule K-1",
+        year: targetYear,
+        entity: `${k1.entityName} (${k1.entityType})`
+      });
     });
   }
 
   // Generate Form 1098 request if mortgage interest exists
   if (entities.form1098) {
     const lender = entities.form1098.lenderName || 'mortgage lender';
-    requests.push(`Form 1098 (Mortgage Interest) from ${lender} for ${entities.form1098.year}`);
-  }
-
-  // Generate itemized deduction requests
-  if (entities.itemizedDeductions && entities.itemizedDeductions.length > 0) {
-    entities.itemizedDeductions.forEach(deduction => {
-      if (deduction.toLowerCase().includes('charitable')) {
-        requests.push(`Charitable donation receipts for ${entities.personalInfo?.taxYear || 'current year'}`);
-      } else if (!deduction.toLowerCase().includes('mortgage')) {
-        // Skip mortgage interest if we already have form1098
-        requests.push(`${deduction} documentation for ${entities.personalInfo?.taxYear || 'current year'}`);
-      }
+    const targetYear = getTargetYear(entities.form1098.year);
+    requests.push({
+      name: `Form 1098 from ${lender} for ${targetYear}`,
+      documentType: "Form 1098",
+      year: targetYear,
+      entity: lender
     });
   }
 
@@ -544,23 +582,21 @@ export async function determineNextSteps(
   const requiredDocuments = generateDocumentRequestsFromEntities(entities);
 
   // Helper to check if a request is satisfied by completed documents
-  const isRequestSatisfied = (request: string, completedDocs: Document[]): boolean => {
-    const reqLower = request.toLowerCase();
+  const isRequestSatisfied = (request: StructuredDocumentRequest, completedDocs: Document[]): boolean => {
+    const reqLower = request.name.toLowerCase();
+    const docType = request.documentType.toLowerCase();
+    const entityName = request.entity?.toLowerCase() || '';
     
-    // Extract key components from request
-    const isW2 = reqLower.includes('w-2') || reqLower.includes('w2');
-    const is1099 = reqLower.includes('1099');
-    const isScheduleC = reqLower.includes('schedule c');
-    const isScheduleE = reqLower.includes('schedule e');
-    const isK1 = reqLower.includes('k-1') || reqLower.includes('k1');
-    const is1098 = reqLower.includes('1098');
-    
-    // Extract employer/payer name from request (between "from" and "for")
-    const fromMatch = reqLower.match(/from\s+(.+?)\s+for/);
-    const entityName = fromMatch ? fromMatch[1].toLowerCase() : '';
+    // Extract key components from document type
+    const isW2 = docType.includes('w-2') || docType.includes('w2');
+    const is1099 = docType.includes('1099');
+    const isScheduleC = docType.includes('schedule c');
+    const isScheduleE = docType.includes('schedule e');
+    const isK1 = docType.includes('k-1') || docType.includes('k1') || docType.includes('schedule k-1');
+    const is1098 = docType.includes('1098');
     
     // Extract full form type for 1099s (e.g., "1099-NEC", "SSA-1099")
-    const form1099TypeMatch = reqLower.match(/(ssa-1099|1099-[a-z]+)/);
+    const form1099TypeMatch = docType.match(/(ssa-1099|1099-[a-z]+)/);
     const form1099Type = form1099TypeMatch ? form1099TypeMatch[1] : '';
     
     return completedDocs.some(doc => {
@@ -676,7 +712,8 @@ export async function determineNextSteps(
   if (isComplete) {
     message = "All required documents have been collected. This customer is ready for tax preparation!";
   } else if (missingDocuments.length > 0) {
-    message = `Please upload the following documents: ${missingDocuments.slice(0, 3).join(", ")}${missingDocuments.length > 3 ? `, and ${missingDocuments.length - 3} more` : ""}.`;
+    const docNames = missingDocuments.slice(0, 3).map(d => d.name).join(", ");
+    message = `Please upload the following documents: ${docNames}${missingDocuments.length > 3 ? `, and ${missingDocuments.length - 3} more` : ""}.`;
   } else if (completedDocs.length === 0) {
     message = "Please upload the customer's most recent tax return to get started.";
   } else {
@@ -693,7 +730,7 @@ export async function determineNextSteps(
 
 interface ChatResponseResult {
   message: string;
-  requestedDocuments: string[];
+  requestedDocuments: StructuredDocumentRequest[];
 }
 
 export async function generateChatResponse(
@@ -712,28 +749,38 @@ Customer Details: ${details.filter((d) => d.value).map((d) => `${d.label}: ${d.v
 Recent conversation: ${messages.slice(-5).map((m) => `${m.sender}: ${m.content}`).join("\n")}
 `;
 
-  const prompt = `You are a helpful tax preparation assistant. The accountant said: "${userMessage}"
+  const prompt = `You are a helpful tax preparation assistant. We are preparing 2024 tax returns. The accountant said: "${userMessage}"
 
 Current context:
 ${context}
 
 Your task:
 1. Acknowledge the accountant's message and provide a helpful response
-2. Based on the conversation, determine if any NEW tax documents should be requested
-3. Return ONLY specific, named document requests (e.g., "W-2 from Google for 2023", "1099-NEC from Meta for 2023")
+2. Based on the conversation, determine if any NEW tax documents should be requested FOR 2024 (current tax year)
+3. Return ONLY specific, structured document requests
 4. Do NOT request documents that are already in the document list above
 5. Only request documents if the accountant's message suggests additional tax obligations
 
 Respond in this exact JSON format:
 {
   "message": "Your conversational response to the accountant",
-  "requestedDocuments": ["Specific Document Name 1", "Specific Document Name 2"]
+  "requestedDocuments": [
+    {
+      "name": "Full descriptive name (e.g., 'W-2 from Microsoft for 2024')",
+      "documentType": "Document type (e.g., 'W-2', '1099-NEC', 'Schedule C', 'Form 1098')",
+      "year": "2024",
+      "entity": "Entity name if applicable (e.g., 'Microsoft', 'Stripe Inc')"
+    }
+  ]
 }
 
-IMPORTANT: The requestedDocuments array should be empty [] unless the conversation reveals NEW tax obligations. Examples:
-- If accountant says "They also worked at Microsoft in 2023" → request W-2 from Microsoft
-- If accountant says "They received a 1099 from Stripe" → request 1099 from Stripe
-- If accountant just asks a question or provides general info → return empty array
+IMPORTANT: 
+- The requestedDocuments array should be empty [] unless the conversation reveals NEW tax obligations
+- Always use 2024 as the year since we're preparing 2024 returns
+- Examples:
+  * If accountant says "They also worked at Microsoft" → request {"name": "W-2 from Microsoft for 2024", "documentType": "W-2", "year": "2024", "entity": "Microsoft"}
+  * If accountant says "They received a 1099 from Stripe" → request {"name": "1099-NEC from Stripe for 2024", "documentType": "1099-NEC", "year": "2024", "entity": "Stripe"}
+  * If accountant just asks a question or provides general info → return empty array
 `;
 
   try {
@@ -752,9 +799,24 @@ IMPORTANT: The requestedDocuments array should be empty [] unless the conversati
     const content = response.choices[0].message.content || "{}";
     const parsed = JSON.parse(content);
     
+    // Validate and parse requested documents
+    const requestedDocuments: StructuredDocumentRequest[] = [];
+    if (Array.isArray(parsed.requestedDocuments)) {
+      for (const doc of parsed.requestedDocuments) {
+        if (doc.name && doc.documentType && doc.year) {
+          requestedDocuments.push({
+            name: doc.name,
+            documentType: doc.documentType,
+            year: doc.year,
+            entity: doc.entity
+          });
+        }
+      }
+    }
+    
     return {
       message: parsed.message || "I'm here to help!",
-      requestedDocuments: Array.isArray(parsed.requestedDocuments) ? parsed.requestedDocuments : [],
+      requestedDocuments,
     };
   } catch (error) {
     console.error("Error generating chat response:", error);

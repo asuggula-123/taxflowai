@@ -59,7 +59,7 @@ export default function Home() {
   };
 
   const handleCustomerClick = (customer: Customer) => {
-    setLocation(`/customer/${customer.id}`);
+    setLocation(`/customers/${customer.id}`);
   };
 
   const handleDeleteCustomer = (customerId: string) => {
