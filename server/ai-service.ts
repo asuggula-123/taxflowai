@@ -996,56 +996,32 @@ ${customerNotes || "None"}
 Current context:
 ${context}
 
-Your tasks:
-1. Acknowledge the accountant's message and provide a helpful response
-2. Based on the conversation, determine if any NEW tax documents should be requested FOR ${intake.year} (current tax year)
-3. Return ONLY specific, structured document requests
-4. Do NOT request documents that are already in the document list above
-5. Only request documents if the accountant's message suggests additional tax obligations
+Respond helpfully to the accountant and:
 
-MEMORY DETECTION (High bar - only detect truly significant information):
-6. Detect if the accountant's message contains information that should be remembered for future tax years
-7. FIRM-level memories: Universal rules, policies, or processes that apply to ALL customers
-   - Examples: "Always ask about HSA contributions", "We need state forms filed by March 1st", "Request crypto transactions for all clients"
-   - NOT firm-level: Customer-specific facts, one-time situations
-8. CUSTOMER-level memories: Material facts or recurring patterns specific to THIS taxpayer
-   - Examples: "Has rental property in Florida", "Self-employed consultant", "Always has charitable donations over $10k"
-   - NOT customer-level: Transient facts, already documented in forms, trivial details
+1. If they mention new income sources or tax obligations not in the document list, create specific document requests for ${intake.year}
+2. If the message contains information valuable for future tax preparation, detect it as a memory:
+   - Type "firm" for policies/processes that apply to all customers
+   - Type "customer" for recurring patterns or material facts about this specific taxpayer
 
 Respond in this exact JSON format:
 {
   "message": "Your conversational response to the accountant",
   "requestedDocuments": [
     {
-      "name": "Full descriptive name (e.g., 'W-2 from Microsoft for ${intake.year}')",
-      "documentType": "Document type (e.g., 'W-2', '1099-NEC', 'Schedule C', 'Form 1098')",
+      "name": "Specific document name (e.g., 'W-2 from Microsoft for ${intake.year}')",
+      "documentType": "Document type (e.g., 'W-2', '1099-NEC')",
       "year": "${intake.year}",
-      "entity": "Entity name if applicable (e.g., 'Microsoft', 'Stripe Inc')"
+      "entity": "Entity name if applicable"
     }
   ],
   "detectedMemories": [
     {
       "type": "firm" or "customer",
-      "content": "The specific fact or rule to remember (concise, actionable)",
-      "reason": "Brief explanation of why this should be remembered"
+      "content": "Concise, actionable information to remember",
+      "reason": "Why this should be remembered"
     }
   ]
 }
-
-IMPORTANT: 
-- The requestedDocuments array should be empty [] unless the conversation reveals NEW tax obligations
-- Always use ${intake.year} as the year since we're preparing ${intake.year} returns
-- The detectedMemories array should be empty [] unless the message contains truly significant, recurring, or universal information
-- Do NOT create memories for: basic facts already in forms, one-time situations, trivial details, transient information
-- Examples of document requests:
-  * If accountant says "They also worked at Microsoft" → request {"name": "W-2 from Microsoft for ${intake.year}", "documentType": "W-2", "year": "${intake.year}", "entity": "Microsoft"}
-  * If accountant says "They received a 1099 from Stripe" → request {"name": "1099-NEC from Stripe for ${intake.year}", "documentType": "1099-NEC", "year": "${intake.year}", "entity": "Stripe"}
-  * If accountant just asks a question or provides general info → return empty array
-- Examples of memory detection:
-  * "Always ask clients about HSA contributions" → firm memory
-  * "This customer has a rental property in Florida every year" → customer memory
-  * "They worked at Google" → NO memory (already captured in W-2 request)
-  * "The deadline is next week" → NO memory (transient)
 `;
 
   try {

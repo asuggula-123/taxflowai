@@ -171,13 +171,30 @@ export default function CustomerDetail() {
         formData.append("files", file);
       });
 
-      const response = await fetch(`/api/intakes/${intakeId}/documents/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      try {
+        const response = await fetch(`/api/intakes/${intakeId}/documents/upload`, {
+          method: "POST",
+          body: formData,
+        });
 
-      if (!response.ok) throw new Error("Upload failed");
-      return response.json();
+        if (!response.ok) {
+          // Parse error message from server response
+          try {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Upload failed");
+          } catch (parseError) {
+            // If response isn't JSON, use generic error
+            throw new Error("Upload failed. Please check your document and try again.");
+          }
+        }
+        return response.json();
+      } catch (error) {
+        // Handle network errors
+        if (error instanceof Error) {
+          throw error;
+        }
+        throw new Error("Network error. Please check your connection and try again.");
+      }
     },
     onMutate: () => {
       toast({
@@ -196,10 +213,10 @@ export default function CustomerDetail() {
         description: "Documents uploaded and analyzed successfully.",
       });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Upload failed",
-        description: "Failed to upload documents.",
+        description: error.message || "Failed to upload documents. Please try again.",
         variant: "destructive",
       });
     },
