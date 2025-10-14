@@ -9,7 +9,7 @@ I prefer iterative development, with a focus on delivering core features first a
 ## System Architecture
 
 ### UI/UX Decisions
-The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI components for a modern and consistent look. The application features a three-section layout for customer details (documents, details, chat) and uses status badges for clear visual cues.
+The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI components for a modern and consistent look. The application features a multi-year intake system with customer summary and intake-specific views. Status badges provide clear visual cues for each tax year intake.
 
 ### Technical Implementations
 - **Frontend**: React, TypeScript, Wouter for routing, TanStack Query for server state management.
@@ -20,22 +20,35 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
   - **Intelligent Document Matching**: Uses pattern-based reconciliation with filename variants and entity name matching to link uploaded documents to requested ones.
   - **Chat Response Generation**: AI provides helpful responses and can create actual document entities based on chat conversations (e.g., "W-2 from Microsoft for 2023").
 - **Data Model**:
-    - **Customers**: id, name, email, status, createdAt
-    - **Documents**: id, customerId, name, documentType, year, entity, status, filePath, createdAt
+    - **Customers**: id, name, email, createdAt
+    - **Tax Year Intakes**: id, customerId, year, status, notes, createdAt
+      - Each customer can have multiple tax year intakes
+      - Status tracks workflow progression for each tax year
+      - Year stored as text (e.g., "2024", "2023")
+    - **Documents**: id, intakeId, name, documentType, year, entity, status, filePath, createdAt
+      - Linked to specific tax year intake, not directly to customer
       - Structured fields enable precise AI matching and visual display with pills/badges
       - Entity field stores company/organization name (e.g., "Microsoft", "Stripe Inc")
-    - **Chat Messages**: id, customerId, sender, content, createdAt
-    - **Customer Details**: id, customerId, category, label, value, createdAt
+    - **Chat Messages**: id, intakeId, sender, content, createdAt
+      - Intake-specific chat history
+    - **Customer Details**: id, intakeId, category, label, value, createdAt
+      - Intake-specific customer details
 
 ### Feature Specifications
 - **Customer Management**: CRUD operations for customers.
+- **Multi-Year Intake System**: Each customer can have multiple tax year intakes.
+  - **Year Selection**: Dropdown shows current+1 year and 3 prior years when creating intake
+  - **Intake-Specific Workflow**: Each tax year has independent documents, chat, and status
+  - **Customer Summary**: Shows all tax year intakes for a customer with status badges
 - **AI-Powered Document Analysis**: Intelligent feedback on uploaded tax documents.
 - **Smart Chat Interface**: AI agent requests missing documents and validates completeness.
-- **Structured Workflow**: A three-phase gated workflow:
-    1. **Awaiting Tax Return**: Initial state, chat disabled, first upload must be a validated 2023 Form 1040.
+- **Structured Workflow**: A three-phase gated workflow per intake:
+    1. **Awaiting Tax Return**: Initial state, chat disabled, first upload must be a validated Form 1040 from (intake year - 1).
+       - e.g., 2024 intake requires 2023 Form 1040
     2. **Incomplete**: Chat enabled, document collection phase, AI analyzes documents and creates requests.
     3. **Ready**: All requested documents collected, ready for tax preparation.
-- **Automatic Status Tracking**: Customer status updates based on workflow progression.
+- **Dynamic Year Validation**: Form 1040 validation adapts to intake year (year - 1).
+- **Automatic Status Tracking**: Intake status updates based on workflow progression.
 - **Document Validation**: AI validates document types and extracts information from PDF content.
 - **Customer Details Extraction**: Populates customer details from documents.
 - **Chat-Driven Document Requests**: AI creates document entities from chat conversations.
@@ -49,6 +62,19 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 
 ## Recent Updates (October 2025)
 
+### Multi-Year Intake System (Latest)
+- **Architecture Overhaul**: Migrated from customer-centric to intake-centric architecture
+  - Added TaxYearIntake table linking customers to year-specific workflows
+  - All documents, messages, and details now linked to intakeId instead of customerId
+  - Status moved from customer to tax year intake level
+- **Customer Summary Page**: Shows customer info and list of all tax year intakes with "Add Intake" functionality
+- **Add Intake Modal**: Year selection dropdown (current+1 plus 3 prior years) with optional notes field
+- **Dynamic Form 1040 Validation**: Validates uploaded 1040 year matches (intake year - 1)
+- **Intake-Specific Pages**: Route structure /customers/:id/intakes/:year for year-specific intake views
+- **API Refactoring**: Complete backend update to use intake context for all operations
+- **Error Handling**: Proper "intake not found" state with navigation back to customer summary
+- **Type Safety**: String() wrappers ensure year comparisons work correctly between route params and stored values
+
 ### Entity Field Implementation
 - Added structured entity field to documents for storing company/organization names
 - Entity field properly persisted across create, update, and edit operations
@@ -57,6 +83,8 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 - Entity can be added, updated, or cleared (set to null) through edit dialog
 
 ### Bug Fixes
+- **Customer Type Fix**: Removed status field from Customer type (status now on intakes only)
+- **CustomerList Crash**: Fixed StatusBadge crash by removing status display from customer list
 - **Routing Consistency**: Changed customer detail route from `/customer/:id` to `/customers/:id` to match API convention
 - **Entity Persistence**: Fixed critical bug where entity field was collected in UI but not persisted to database
 - **Entity Pre-population**: Fixed bug where editing a document did not pre-populate entity field, causing silent data loss

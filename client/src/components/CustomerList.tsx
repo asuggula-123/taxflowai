@@ -1,13 +1,11 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusBadge, CustomerStatus } from "./StatusBadge";
 import { Mail, Trash2 } from "lucide-react";
 
 export interface Customer {
   id: string;
   name: string;
   email: string;
-  status: CustomerStatus;
 }
 
 interface CustomerListProps {
@@ -54,7 +52,6 @@ export function CustomerList({ customers, onCustomerClick, onDeleteCustomer }: C
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <StatusBadge status={customer.status} />
                 <Button
                   size="icon"
                   variant="ghost"
