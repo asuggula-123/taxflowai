@@ -106,6 +106,8 @@ TaxFlow is a professional tax document intake application designed for accountan
   - Automatic cleanup of uploaded OpenAI files to prevent quota exhaustion
 - **Delete Customer**: Added ability to delete customers with confirmation dialog and automatic cleanup
 - **Upload Progress Indicators**: Real-time visual feedback during document upload and AI analysis
+- **Optimistic Chat UI**: User messages appear instantly before server response for snappier feel
+- **AI Thinking Indicator**: Shows "AI is thinking..." with spinner while waiting for AI response
 
 ### Improvements
 - **Expanded Form Coverage**: Now handles all major tax forms
@@ -126,6 +128,12 @@ TaxFlow is a professional tax document intake application designed for accountan
   - Long filenames now wrap to multiple lines instead of truncating
   - Proper alignment with `items-start` for wrapped text
   - Clean, professional layout with consistent spacing
+- **Chat UX Improvements**: Enhanced responsiveness and feedback
+  - Optimistic updates: User messages appear immediately
+  - AI thinking indicator: Shows loading state while AI processes
+  - Document list auto-refresh: Updates when AI creates new document requests via chat
+  - Error handling: Shows toast notification if message fails to send
+  - Concurrent send safety: Multiple rapid messages handled correctly
 
 ### Bug Fixes
 - **AI Follow-up Messages**: Fixed issue where AI would acknowledge document upload but not request additional documents
@@ -138,6 +146,13 @@ TaxFlow is a professional tax document intake application designed for accountan
   - Now shows clean error messages only (e.g., "⚠️ OpenAI API quota exceeded. Unable to analyze document at this time.")
   - No misleading fallback suggestions or analysis attempts
   - Users see exactly when AI is working vs when there's an issue
+- **Document List Sync Issue**: Fixed bug where document list didn't update after chat responses
+  - Added document cache invalidation to chat message mutation
+  - Now when AI creates new document requests (K-1, 1099-R) via chat, the document list refreshes immediately
+- **Chat Message Visibility**: Fixed issue where user's message wasn't visible until AI responded
+  - Implemented optimistic UI updates using TanStack Query
+  - User messages now appear instantly, then AI response follows
+  - Added proper error rollback that only removes failed message (preserves concurrent sends)
 
 ### Technical Details
 - Conservative matching approach balances flexibility with accuracy
