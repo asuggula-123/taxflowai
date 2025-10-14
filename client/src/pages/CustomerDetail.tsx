@@ -189,7 +189,7 @@ export default function CustomerDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "messages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "details"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intakes", customerId, year] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       toast({
         title: "Upload complete",
@@ -332,6 +332,7 @@ export default function CustomerDetail() {
             progressMessage={progressMessage}
             progressValue={progressValue}
             customerId={customerId}
+            intakeYear={intake.year}
             onConfirmMemory={handleConfirmMemory}
             onDismissMemory={handleDismissMemory}
             isConfirmingMemory={confirmMemoryMutation.isPending}

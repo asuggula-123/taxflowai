@@ -32,6 +32,7 @@ interface ChatInterfaceProps {
   progressMessage?: string;
   progressValue?: number;
   customerId?: string;
+  intakeYear?: string;
   onConfirmMemory?: (messageId: string, memory: DetectedMemory) => void;
   onDismissMemory?: (messageId: string, memoryIndex: number) => void;
   isConfirmingMemory?: boolean;
@@ -48,6 +49,7 @@ export function ChatInterface({
   progressMessage = "",
   progressValue = 0,
   customerId,
+  intakeYear,
   onConfirmMemory,
   onDismissMemory,
   isConfirmingMemory = false,
@@ -57,6 +59,8 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isChatDisabled = customerStatus === "Awaiting Tax Return";
+  
+  const priorYear = intakeYear ? String(parseInt(intakeYear) - 1) : "2023";
 
   const handleSend = () => {
     if (input.trim() && !isChatDisabled) {
@@ -206,7 +210,7 @@ export function ChatInterface({
         {isChatDisabled ? (
           <div className="p-4 border-2 border-dashed rounded-md bg-muted/30" data-testid="chat-disabled-message">
             <p className="text-sm text-muted-foreground text-center">
-              Chat is disabled until you upload and validate the customer's 2023 tax return.
+              Chat is disabled until you upload and validate the customer's {priorYear} tax return.
             </p>
           </div>
         ) : (

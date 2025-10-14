@@ -123,6 +123,8 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 - **Entity Pre-population**: Fixed bug where editing a document did not pre-populate entity field, causing silent data loss
 - **Entity Clearing**: Fixed payload construction to explicitly send null when entity is cleared, ensuring badge removal
 - **Upload Error Handling**: Upload endpoint now returns 400 when AI analysis fails instead of 200, preventing invalid document creation
+- **Chat Enable After Upload**: Fixed query invalidation mismatch where intake status wasn't refetched after Form 1040 upload (queryKey was `["/api/intakes", intakeId]` but should be `["/api/intakes", customerId, year]`), causing chat to remain disabled
+- **Dynamic Year in Chat Message**: Fixed hardcoded "2023" in chat disabled message to dynamically calculate prior year based on intake year
 
 ## External Dependencies
 - **OpenAI API**: Utilized for AI-powered document analysis (GPT-5) and chat response generation.
