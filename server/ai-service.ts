@@ -174,7 +174,7 @@ Be precise and validate against actual document content.`
     // Clean up uploaded file
     if (uploadedFileId) {
       try {
-        await openai.files.del(uploadedFileId);
+        await openai.files.delete(uploadedFileId);
       } catch (error) {
         console.error("Failed to delete uploaded file:", uploadedFileId);
       }
@@ -664,9 +664,9 @@ export async function determineNextSteps(
   // Determine completion status
   const isComplete = missingDocuments.length === 0 && requiredDocuments.length > 0;
   
-  let customerStatus: "Not Started" | "Incomplete" | "Ready" = "Incomplete";
+  let customerStatus: "Awaiting Tax Return" | "Incomplete" | "Ready" = "Incomplete";
   if (completedDocs.length === 0) {
-    customerStatus = "Not Started";
+    customerStatus = "Awaiting Tax Return";
   } else if (isComplete) {
     customerStatus = "Ready";
   }

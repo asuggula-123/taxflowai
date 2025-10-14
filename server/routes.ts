@@ -5,7 +5,7 @@ import multer from "multer";
 import { insertCustomerSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
-import { analyzeDocument, determineNextSteps, generateChatResponse } from "./ai-service";
+import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn } from "./ai-service";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -102,6 +102,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
         return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      // Check if customer is awaiting tax return validation
+      const customer = await storage.getCustomer(req.params.customerId);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+
+      // If customer is awaiting tax return, validate the first upload
+      if (customer.status === "Awaiting Tax Return") {
+        // Only validate the first file
+        const firstFile = files[0];
+        const validation = await validateTaxReturn(
+          firstFile.originalname,
+          firstFile.path,
+          customer.name
+        );
+
+        if (!validation.isValid) {
+          // Create error message based on what failed
+          let errorMsg = "Tax return validation failed: ";
+          if (!validation.isForm1040) {
+            errorMsg += `This appears to be ${validation.extractedTaxYear ? 'a' : 'an'} ${validation.extractedTaxYear || ''} document, but we need a complete 2023 Form 1040 tax return. `;
+          }
+          if (!validation.isTaxYear2023) {
+            errorMsg += `The tax year is ${validation.extractedTaxYear || 'unknown'}, but we need the 2023 tax return. `;
+          }
+          if (!validation.taxpayerNameMatches) {
+            errorMsg += `The taxpayer name "${validation.extractedTaxpayerName || 'unknown'}" does not match the customer name "${customer.name}". `;
+          }
+          
+          // Create AI message with error
+          await storage.createChatMessage({
+            customerId: req.params.customerId,
+            sender: "ai",
+            content: `⚠️ ${errorMsg}\n\nPlease upload your complete 2023 Form 1040 tax return to continue.`
+          });
+
+          return res.status(400).json({ error: errorMsg });
+        }
+
+        // Validation passed - continue with normal upload processing
       }
 
       const uploadedDocs = [];
