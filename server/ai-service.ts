@@ -244,37 +244,43 @@ export async function analyzeDocument(
             },
             {
               type: "input_text",
-              text: `You are an expert tax preparation assistant. Analyze this tax document and extract STRUCTURED entities.
+              text: `You are an expert tax preparation assistant. Analyze this tax document and extract STRUCTURED entities with PROVENANCE.
 
 Based on the ACTUAL DOCUMENT CONTENT, extract structured data:
 
 For Form 1040 (Tax Return):
-- Extract EACH W-2 employer as separate object with name, wages, year
-- Extract EACH 1099 payer with specific type (1099-NEC, 1099-INT, 1099-DIV, 1099-R, SSA-1099, etc.), payer name, amount, year
-- Extract Schedule C business info if present (business name, year)
-- Extract Schedule E rental property info if present (property address, year)
-- Extract K-1 info if present (entity name, type: Partnership/S-Corp/Estate/Trust, year)
-- Extract Form 1098 mortgage interest if present (lender name, year)
+- Extract EACH W-2 employer as separate object with name, wages, year, AND provenance
+- Extract EACH 1099 payer with specific type (1099-NEC, 1099-INT, 1099-DIV, 1099-R, SSA-1099, etc.), payer name, amount, year, AND provenance
+- Extract Schedule C business info if present (business name, year, provenance)
+- Extract Schedule E rental property info if present (property address, year, provenance)
+- Extract K-1 info if present (entity name, type: Partnership/S-Corp/Estate/Trust, year, provenance)
+- Extract Form 1098 mortgage interest if present (lender name, year, provenance)
 - Extract personal info (taxpayer name, filing status, tax year)
 - Extract itemized deductions if applicable
 
 For W-2:
-- Extract employer as single employer object
+- Extract employer as single employer object with provenance
 
 For 1099 (all types):
-- Extract as single form1099Payers object with specific type (1099-NEC, 1099-INT, etc.)
+- Extract as single form1099Payers object with specific type and provenance
 
 For Schedule C:
-- Extract as scheduleC object
+- Extract as scheduleC object with provenance
 
 For Schedule E:
-- Extract as scheduleE object
+- Extract as scheduleE object with provenance
 
 For K-1:
-- Extract as formK1 array item
+- Extract as formK1 array item with provenance
 
 For 1098:
-- Extract as form1098 object
+- Extract as form1098 object with provenance
+
+PROVENANCE REQUIREMENTS:
+For EACH entity, include:
+- page: The page number where you found this information (if available)
+- lineReference: The specific line number or section (e.g., "Line 1a", "Schedule 1 Line 3")
+- evidence: A brief description of what you saw (e.g., "W-2 wages of $125,000 from Acme Corp", "1099-R retirement distribution of $45,000 from Fidelity")
 
 CRITICAL: Extract actual entities found in the document, not generic categories.
 
@@ -284,12 +290,12 @@ Respond in JSON format:
   "documentType": "exact form name with year (e.g., 'Form 1040 (2023)', 'Form W-2 (2024)')",
   "missingInfo": ["list any missing information"],
   "entities": {
-    "employers": [{"name": "Google LLC", "wages": 85000, "year": 2024}],
-    "form1099Payers": [{"name": "Stripe Inc", "type": "1099-NEC", "amount": 15000, "year": 2024}],
-    "scheduleC": {"businessName": "Acme Consulting", "hasIncome": true, "year": 2024},
-    "scheduleE": {"propertyAddress": "123 Main St", "hasRentalIncome": true, "year": 2024},
-    "formK1": [{"entityName": "ABC Partnership", "entityType": "Partnership", "year": 2024}],
-    "form1098": {"lenderName": "Chase Bank", "year": 2024},
+    "employers": [{"name": "Google LLC", "wages": 85000, "year": 2024, "provenance": {"page": 12, "lineReference": "Line 1a", "evidence": "W-2 wages of $85,000 from Google LLC"}}],
+    "form1099Payers": [{"name": "Stripe Inc", "type": "1099-NEC", "amount": 15000, "year": 2024, "provenance": {"page": 13, "lineReference": "Schedule 1 Line 3", "evidence": "1099-NEC income of $15,000 from Stripe Inc"}}],
+    "scheduleC": {"businessName": "Acme Consulting", "hasIncome": true, "year": 2024, "provenance": {"lineReference": "Schedule C", "evidence": "Business income from Acme Consulting"}},
+    "scheduleE": {"propertyAddress": "123 Main St", "hasRentalIncome": true, "year": 2024, "provenance": {"lineReference": "Schedule E", "evidence": "Rental income from 123 Main St"}},
+    "formK1": [{"entityName": "ABC Partnership", "entityType": "Partnership", "year": 2024, "provenance": {"lineReference": "Schedule E Line 28", "evidence": "K-1 income from ABC Partnership (Partnership)"}}],
+    "form1098": {"lenderName": "Chase Bank", "year": 2024, "provenance": {"lineReference": "Schedule A Line 8a", "evidence": "Mortgage interest from Chase Bank"}},
     "personalInfo": {"taxpayerName": "John Doe", "filingStatus": "Married Filing Jointly", "taxYear": 2023},
     "itemizedDeductions": ["mortgage interest", "charitable donations"]
   },
@@ -297,7 +303,10 @@ Respond in JSON format:
   "feedback": "specific confirmation of what you found"
 }
 
-IMPORTANT: Only include entity fields that are actually found in the document. Leave arrays empty if no entities found.`
+IMPORTANT: 
+- Only include entity fields that are actually found in the document. Leave arrays empty if no entities found.
+- ALWAYS include provenance for every entity you extract (except personalInfo and itemizedDeductions).
+- If you cannot determine the page number, omit the "page" field but always include "lineReference" and "evidence".`
             }
           ]
         }
