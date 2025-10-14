@@ -28,6 +28,7 @@ export const customers = pgTable("customers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   email: text("email").notNull(),
+  notes: text("notes"), // Customer-specific notes/memories (markdown)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -70,6 +71,21 @@ export const customerDetails = pgTable("customer_details", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const firmSettings = pgTable("firm_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  notes: text("notes"), // Firm-wide instructions/memories (markdown)
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const memories = pgTable("memories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(), // "firm" | "customer"
+  content: text("content").notNull(),
+  customerId: varchar("customer_id").references(() => customers.id),
+  intakeId: varchar("intake_id").references(() => taxYearIntakes.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertCustomerSchema = createInsertSchema(customers).omit({
   id: true,
   createdAt: true,
@@ -96,6 +112,16 @@ export const insertCustomerDetailSchema = createInsertSchema(customerDetails).om
   createdAt: true,
 });
 
+export const insertFirmSettingsSchema = createInsertSchema(firmSettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertMemorySchema = createInsertSchema(memories).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Customer = typeof customers.$inferSelect;
 export type InsertTaxYearIntake = z.infer<typeof insertTaxYearIntakeSchema>;
@@ -106,3 +132,7 @@ export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type InsertCustomerDetail = z.infer<typeof insertCustomerDetailSchema>;
 export type CustomerDetail = typeof customerDetails.$inferSelect;
+export type InsertFirmSettings = z.infer<typeof insertFirmSettingsSchema>;
+export type FirmSettings = typeof firmSettings.$inferSelect;
+export type InsertMemory = z.infer<typeof insertMemorySchema>;
+export type Memory = typeof memories.$inferSelect;

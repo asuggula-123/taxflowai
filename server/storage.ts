@@ -9,6 +9,10 @@ import {
   type InsertChatMessage,
   type CustomerDetail,
   type InsertCustomerDetail,
+  type FirmSettings,
+  type InsertFirmSettings,
+  type Memory,
+  type InsertMemory,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -40,6 +44,18 @@ export interface IStorage {
   // Customer detail operations
   getCustomerDetailsByIntake(intakeId: string): Promise<CustomerDetail[]>;
   upsertCustomerDetail(detail: InsertCustomerDetail): Promise<CustomerDetail>;
+
+  // Firm settings operations
+  getFirmSettings(): Promise<FirmSettings | undefined>;
+  updateFirmSettings(notes: string): Promise<FirmSettings>;
+
+  // Customer notes operations
+  updateCustomerNotes(customerId: string, notes: string): Promise<Customer | undefined>;
+
+  // Memory operations
+  getMemories(type?: 'firm' | 'customer', customerId?: string): Promise<Memory[]>;
+  createMemory(memory: InsertMemory): Promise<Memory>;
+  deleteMemory(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -48,6 +64,8 @@ export class MemStorage implements IStorage {
   private documents: Map<string, Document>;
   private chatMessages: Map<string, ChatMessage>;
   private customerDetails: Map<string, CustomerDetail>;
+  private firmSettings: FirmSettings | undefined;
+  private memories: Map<string, Memory>;
 
   constructor() {
     this.customers = new Map();
@@ -55,6 +73,8 @@ export class MemStorage implements IStorage {
     this.documents = new Map();
     this.chatMessages = new Map();
     this.customerDetails = new Map();
+    this.firmSettings = undefined;
+    this.memories = new Map();
   }
 
   async getCustomers(): Promise<Customer[]> {
@@ -72,6 +92,7 @@ export class MemStorage implements IStorage {
     const customer: Customer = {
       ...insertCustomer,
       id,
+      notes: insertCustomer.notes || null,
       createdAt: new Date(),
     };
     this.customers.set(id, customer);
@@ -264,6 +285,74 @@ export class MemStorage implements IStorage {
     };
     this.customerDetails.set(id, detail);
     return detail;
+  }
+
+  async getFirmSettings(): Promise<FirmSettings | undefined> {
+    return this.firmSettings;
+  }
+
+  async updateFirmSettings(notes: string): Promise<FirmSettings> {
+    if (!this.firmSettings) {
+      const id = randomUUID();
+      this.firmSettings = {
+        id,
+        notes,
+        updatedAt: new Date(),
+      };
+    } else {
+      this.firmSettings = {
+        ...this.firmSettings,
+        notes,
+        updatedAt: new Date(),
+      };
+    }
+    return this.firmSettings;
+  }
+
+  async updateCustomerNotes(customerId: string, notes: string): Promise<Customer | undefined> {
+    const customer = this.customers.get(customerId);
+    if (!customer) return undefined;
+
+    const updated = { ...customer, notes };
+    this.customers.set(customerId, updated);
+    return updated;
+  }
+
+  async getMemories(type?: 'firm' | 'customer', customerId?: string): Promise<Memory[]> {
+    let memories = Array.from(this.memories.values());
+    
+    if (type) {
+      memories = memories.filter(m => m.type === type);
+    }
+    
+    if (customerId) {
+      memories = memories.filter(m => m.customerId === customerId);
+    }
+    
+    return memories.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createMemory(insertMemory: InsertMemory): Promise<Memory> {
+    const id = randomUUID();
+    const memory: Memory = {
+      ...insertMemory,
+      id,
+      customerId: insertMemory.customerId || null,
+      intakeId: insertMemory.intakeId || null,
+      createdAt: new Date(),
+    };
+    this.memories.set(id, memory);
+    return memory;
+  }
+
+  async deleteMemory(id: string): Promise<boolean> {
+    const memory = this.memories.get(id);
+    if (!memory) return false;
+    
+    this.memories.delete(id);
+    return true;
   }
 }
 
