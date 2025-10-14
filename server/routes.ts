@@ -5,7 +5,7 @@ import multer from "multer";
 import { insertCustomerSchema, insertTaxYearIntakeSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
-import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn } from "./ai-service";
+import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn, synthesizeMemoriesIntoNotes } from "./ai-service";
 import { progressService } from "./progress-service";
 import { randomUUID } from "crypto";
 
@@ -144,6 +144,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete memory" });
+    }
+  });
+
+  // Memory synthesis endpoint
+  app.post("/api/memories/synthesize", async (req, res) => {
+    try {
+      const { type, customerId } = req.body;
+      
+      // Fetch memories based on type and optional customerId
+      const memories = await storage.getMemories(type, customerId);
+      
+      // Synthesize memories into organized notes
+      const synthesizedNotes = await synthesizeMemoriesIntoNotes(memories);
+      
+      // Update the appropriate notes field
+      if (type === 'firm') {
+        await storage.updateFirmSettings(synthesizedNotes);
+      } else if (type === 'customer' && customerId) {
+        await storage.updateCustomerNotes(customerId, synthesizedNotes);
+      }
+      
+      res.json({ notes: synthesizedNotes });
+    } catch (error) {
+      console.error("Memory synthesis error:", error);
+      res.status(500).json({ error: "Failed to synthesize memories" });
     }
   });
 
@@ -672,7 +697,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      res.status(201).json({ message, aiMessage });
+      res.status(201).json({ 
+        message, 
+        aiMessage,
+        detectedMemories: aiResponse.detectedMemories 
+      });
     } catch (error) {
       console.error("Message error:", error);
       res.status(400).json({ error: "Invalid message data" });

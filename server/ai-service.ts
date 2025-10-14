@@ -904,9 +904,61 @@ export async function determineNextSteps(
   };
 }
 
+export interface DetectedMemory {
+  type: 'firm' | 'customer';
+  content: string;
+  reason: string;
+}
+
 interface ChatResponseResult {
   message: string;
   requestedDocuments: StructuredDocumentRequest[];
+  detectedMemories: DetectedMemory[];
+}
+
+export async function synthesizeMemoriesIntoNotes(
+  memories: { content: string; createdAt: Date }[]
+): Promise<string> {
+  if (memories.length === 0) {
+    return "";
+  }
+
+  try {
+    const memoriesList = memories
+      .map((m, i) => `${i + 1}. ${m.content} (saved: ${new Date(m.createdAt).toLocaleDateString()})`)
+      .join('\n');
+
+    const prompt = `You are organizing tax preparation notes. Synthesize the following individual memories into a clean, organized note format.
+
+Individual memories:
+${memoriesList}
+
+Your task:
+1. Group related memories together
+2. Remove duplicates or redundant information
+3. Present information in a clear, scannable format
+4. Use bullet points or short paragraphs
+5. Keep it concise and actionable
+
+Return ONLY the synthesized notes as plain text, formatted for easy reading.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional note organizer. Create clear, concise, well-organized notes.",
+        },
+        { role: "user", content: prompt },
+      ],
+    });
+
+    return response.choices[0].message.content || "";
+  } catch (error) {
+    console.error("Error synthesizing memories:", error);
+    // Fallback: just join memories with line breaks
+    return memories.map(m => `• ${m.content}`).join('\n');
+  }
 }
 
 export async function generateChatResponse(
@@ -922,46 +974,78 @@ export async function generateChatResponse(
   const documents = await storage.getDocumentsByIntake(intakeId);
   const details = await storage.getCustomerDetailsByIntake(intakeId);
   const messages = await storage.getChatMessagesByIntake(intakeId);
+  const firmSettings = await storage.getFirmSettings();
+  const customerNotes = customer?.notes || "";
 
   const context = `
 Customer: ${customer?.name}
+Tax Year: ${intake.year}
 Documents: ${documents.map((d) => `${d.name} (${d.status})`).join(", ")}
 Customer Details: ${details.filter((d) => d.value).map((d) => `${d.label}: ${d.value}`).join(", ")}
 Recent conversation: ${messages.slice(-5).map((m) => `${m.sender}: ${m.content}`).join("\n")}
+
+Firm-level standing instructions:
+${firmSettings?.notes || "None"}
+
+Customer-specific notes:
+${customerNotes || "None"}
 `;
 
-  const prompt = `You are a helpful tax preparation assistant. We are preparing 2024 tax returns. The accountant said: "${userMessage}"
+  const prompt = `You are a helpful tax preparation assistant. We are preparing ${intake.year} tax returns. The accountant said: "${userMessage}"
 
 Current context:
 ${context}
 
-Your task:
+Your tasks:
 1. Acknowledge the accountant's message and provide a helpful response
-2. Based on the conversation, determine if any NEW tax documents should be requested FOR 2024 (current tax year)
+2. Based on the conversation, determine if any NEW tax documents should be requested FOR ${intake.year} (current tax year)
 3. Return ONLY specific, structured document requests
 4. Do NOT request documents that are already in the document list above
 5. Only request documents if the accountant's message suggests additional tax obligations
+
+MEMORY DETECTION (High bar - only detect truly significant information):
+6. Detect if the accountant's message contains information that should be remembered for future tax years
+7. FIRM-level memories: Universal rules, policies, or processes that apply to ALL customers
+   - Examples: "Always ask about HSA contributions", "We need state forms filed by March 1st", "Request crypto transactions for all clients"
+   - NOT firm-level: Customer-specific facts, one-time situations
+8. CUSTOMER-level memories: Material facts or recurring patterns specific to THIS taxpayer
+   - Examples: "Has rental property in Florida", "Self-employed consultant", "Always has charitable donations over $10k"
+   - NOT customer-level: Transient facts, already documented in forms, trivial details
 
 Respond in this exact JSON format:
 {
   "message": "Your conversational response to the accountant",
   "requestedDocuments": [
     {
-      "name": "Full descriptive name (e.g., 'W-2 from Microsoft for 2024')",
+      "name": "Full descriptive name (e.g., 'W-2 from Microsoft for ${intake.year}')",
       "documentType": "Document type (e.g., 'W-2', '1099-NEC', 'Schedule C', 'Form 1098')",
-      "year": "2024",
+      "year": "${intake.year}",
       "entity": "Entity name if applicable (e.g., 'Microsoft', 'Stripe Inc')"
+    }
+  ],
+  "detectedMemories": [
+    {
+      "type": "firm" or "customer",
+      "content": "The specific fact or rule to remember (concise, actionable)",
+      "reason": "Brief explanation of why this should be remembered"
     }
   ]
 }
 
 IMPORTANT: 
 - The requestedDocuments array should be empty [] unless the conversation reveals NEW tax obligations
-- Always use 2024 as the year since we're preparing 2024 returns
-- Examples:
-  * If accountant says "They also worked at Microsoft" → request {"name": "W-2 from Microsoft for 2024", "documentType": "W-2", "year": "2024", "entity": "Microsoft"}
-  * If accountant says "They received a 1099 from Stripe" → request {"name": "1099-NEC from Stripe for 2024", "documentType": "1099-NEC", "year": "2024", "entity": "Stripe"}
+- Always use ${intake.year} as the year since we're preparing ${intake.year} returns
+- The detectedMemories array should be empty [] unless the message contains truly significant, recurring, or universal information
+- Do NOT create memories for: basic facts already in forms, one-time situations, trivial details, transient information
+- Examples of document requests:
+  * If accountant says "They also worked at Microsoft" → request {"name": "W-2 from Microsoft for ${intake.year}", "documentType": "W-2", "year": "${intake.year}", "entity": "Microsoft"}
+  * If accountant says "They received a 1099 from Stripe" → request {"name": "1099-NEC from Stripe for ${intake.year}", "documentType": "1099-NEC", "year": "${intake.year}", "entity": "Stripe"}
   * If accountant just asks a question or provides general info → return empty array
+- Examples of memory detection:
+  * "Always ask clients about HSA contributions" → firm memory
+  * "This customer has a rental property in Florida every year" → customer memory
+  * "They worked at Google" → NO memory (already captured in W-2 request)
+  * "The deadline is next week" → NO memory (transient)
 `;
 
   try {
@@ -995,15 +1079,32 @@ IMPORTANT:
       }
     }
     
+    // Validate and parse detected memories
+    const detectedMemories: DetectedMemory[] = [];
+    if (Array.isArray(parsed.detectedMemories)) {
+      for (const memory of parsed.detectedMemories) {
+        if (memory.type && memory.content && memory.reason && 
+            (memory.type === 'firm' || memory.type === 'customer')) {
+          detectedMemories.push({
+            type: memory.type,
+            content: memory.content,
+            reason: memory.reason
+          });
+        }
+      }
+    }
+    
     return {
       message: parsed.message || "I'm here to help!",
       requestedDocuments,
+      detectedMemories,
     };
   } catch (error) {
     console.error("Error generating chat response:", error);
     return {
       message: "I understand. Please continue with the document upload process.",
       requestedDocuments: [],
+      detectedMemories: [],
     };
   }
 }
