@@ -318,6 +318,55 @@ IMPORTANT:
       response.output_text || "{}"
     );
     
+    // VALIDATION PASS: Check for missed entities (2nd pass for accuracy)
+    if (analysis.entities && uploadedFileId) {
+      try {
+        const missedEntities = await validateExtractedEntities(uploadedFileId, analysis.entities);
+        
+        // Merge missed entities with original extraction
+        if (missedEntities && Object.keys(missedEntities).length > 0) {
+          console.log("Validation pass found additional entities:", JSON.stringify(missedEntities));
+          
+          // Merge employers
+          if (missedEntities.employers && missedEntities.employers.length > 0) {
+            analysis.entities.employers = [
+              ...(analysis.entities.employers || []),
+              ...missedEntities.employers
+            ];
+          }
+          
+          // Merge 1099 payers
+          if (missedEntities.form1099Payers && missedEntities.form1099Payers.length > 0) {
+            analysis.entities.form1099Payers = [
+              ...(analysis.entities.form1099Payers || []),
+              ...missedEntities.form1099Payers
+            ];
+          }
+          
+          // Merge K-1 forms
+          if (missedEntities.formK1 && missedEntities.formK1.length > 0) {
+            analysis.entities.formK1 = [
+              ...(analysis.entities.formK1 || []),
+              ...missedEntities.formK1
+            ];
+          }
+          
+          // Use missed entities for singleton fields if original was empty
+          if (missedEntities.scheduleC && !analysis.entities.scheduleC) {
+            analysis.entities.scheduleC = missedEntities.scheduleC;
+          }
+          if (missedEntities.scheduleE && !analysis.entities.scheduleE) {
+            analysis.entities.scheduleE = missedEntities.scheduleE;
+          }
+          if (missedEntities.form1098 && !analysis.entities.form1098) {
+            analysis.entities.form1098 = missedEntities.form1098;
+          }
+        }
+      } catch (validationError) {
+        console.error("Validation pass failed, continuing with original extraction:", validationError);
+      }
+    }
+    
     // Clean up uploaded file from OpenAI
     if (uploadedFileId) {
       try {
@@ -352,9 +401,9 @@ IMPORTANT:
           };
           
           // Now overlay new entities from the AI analysis
-          // Merge employers (avoid duplicates by name+year)
+          // Merge employers (avoid duplicates by name+year, preserve provenance)
           if (analysis.entities.employers && analysis.entities.employers.length > 0) {
-            type Employer = { name: string; wages: number; year: number };
+            type Employer = { name: string; wages: number; year: number; provenance?: Provenance };
             const employersMap = new Map<string, Employer>();
             
             // Start with existing
@@ -362,7 +411,7 @@ IMPORTANT:
               employersMap.set(`${emp.name}-${emp.year}`, emp);
             });
             
-            // Add new
+            // Add new (overwrites existing with same key, keeping new provenance)
             analysis.entities.employers.forEach(emp => {
               employersMap.set(`${emp.name}-${emp.year}`, emp);
             });
@@ -370,9 +419,9 @@ IMPORTANT:
             mergedEntities.employers = Array.from(employersMap.values());
           }
           
-          // Merge 1099 payers (avoid duplicates by name+type+year)
+          // Merge 1099 payers (avoid duplicates by name+type+year, preserve provenance)
           if (analysis.entities.form1099Payers && analysis.entities.form1099Payers.length > 0) {
-            type Payer = { name: string; type: string; amount: number; year: number };
+            type Payer = { name: string; type: string; amount: number; year: number; provenance?: Provenance };
             const payersMap = new Map<string, Payer>();
             
             // Start with existing
@@ -380,7 +429,7 @@ IMPORTANT:
               payersMap.set(`${payer.name}-${payer.type}-${payer.year}`, payer);
             });
             
-            // Add new
+            // Add new (overwrites existing with same key, keeping new provenance)
             analysis.entities.form1099Payers.forEach(payer => {
               payersMap.set(`${payer.name}-${payer.type}-${payer.year}`, payer);
             });
@@ -388,9 +437,9 @@ IMPORTANT:
             mergedEntities.form1099Payers = Array.from(payersMap.values());
           }
           
-          // Merge K-1 forms (avoid duplicates by entity name+type+year)
+          // Merge K-1 forms (avoid duplicates by entity name+type+year, preserve provenance)
           if (analysis.entities.formK1 && analysis.entities.formK1.length > 0) {
-            type K1 = { entityName: string; entityType: string; year: number };
+            type K1 = { entityName: string; entityType: string; year: number; provenance?: Provenance };
             const k1Map = new Map<string, K1>();
             
             // Start with existing
@@ -398,7 +447,7 @@ IMPORTANT:
               k1Map.set(`${k1.entityName}-${k1.entityType}-${k1.year}`, k1);
             });
             
-            // Add new
+            // Add new (overwrites existing with same key, keeping new provenance)
             analysis.entities.formK1.forEach(k1 => {
               k1Map.set(`${k1.entityName}-${k1.entityType}-${k1.year}`, k1);
             });
@@ -492,6 +541,80 @@ IMPORTANT:
   }
 }
 
+// Validation pass: Review extracted entities and catch any missed items
+async function validateExtractedEntities(
+  fileId: string,
+  extractedEntities: TaxEntities
+): Promise<TaxEntities> {
+  try {
+    // Create a summary of what we found
+    const summary = {
+      employers: extractedEntities.employers?.map(e => e.name) || [],
+      form1099Payers: extractedEntities.form1099Payers?.map(p => `${p.type} from ${p.name}`) || [],
+      scheduleC: extractedEntities.scheduleC?.businessName || null,
+      scheduleE: extractedEntities.scheduleE?.propertyAddress || null,
+      formK1: extractedEntities.formK1?.map(k => `${k.entityName} (${k.entityType})`) || [],
+      form1098: extractedEntities.form1098?.lenderName || null,
+    };
+
+    const response = await openai.responses.create({
+      model: "gpt-5",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              file_id: fileId,
+            },
+            {
+              type: "input_text",
+              text: `You are validating a tax document extraction. I already found these entities:
+
+EMPLOYERS (W-2): ${summary.employers.join(', ') || 'None'}
+1099 PAYERS: ${summary.form1099Payers.join(', ') || 'None'}
+SCHEDULE C BUSINESS: ${summary.scheduleC || 'None'}
+SCHEDULE E PROPERTY: ${summary.scheduleE || 'None'}
+K-1 ENTITIES: ${summary.formK1.join(', ') || 'None'}
+FORM 1098 LENDER: ${summary.form1098 || 'None'}
+
+VALIDATION TASK:
+1. Review the document carefully
+2. Check if I MISSED any income sources, entities, or deductions
+3. Return ONLY the MISSING entities with provenance
+
+If you find missing entities, return them in the same JSON format as the extraction, including provenance:
+{
+  "employers": [{"name": "...", "wages": 0, "year": 2024, "provenance": {"page": 12, "lineReference": "Line 1a", "evidence": "..."}}],
+  "form1099Payers": [{"name": "...", "type": "1099-R", "amount": 0, "year": 2024, "provenance": {"lineReference": "...", "evidence": "..."}}],
+  "scheduleC": {"businessName": "...", "hasIncome": true, "year": 2024, "provenance": {"lineReference": "...", "evidence": "..."}},
+  "scheduleE": {"propertyAddress": "...", "hasRentalIncome": true, "year": 2024, "provenance": {"lineReference": "...", "evidence": "..."}},
+  "formK1": [{"entityName": "...", "entityType": "Partnership", "year": 2024, "provenance": {"lineReference": "...", "evidence": "..."}}],
+  "form1098": {"lenderName": "...", "year": 2024, "provenance": {"lineReference": "...", "evidence": "..."}}
+}
+
+If nothing was missed, return an empty object: {}
+
+CRITICAL: 
+- ONLY return entities that were MISSED in the first extraction
+- DO NOT repeat entities I already found
+- ALWAYS include provenance (page, lineReference, evidence) for any missing entities you find
+- Focus on income sources and major deductions`
+            }
+          ]
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    });
+
+    const missedEntities: TaxEntities = JSON.parse(response.output_text || "{}");
+    return missedEntities;
+  } catch (error) {
+    console.error("Error in validation pass:", error);
+    return {}; // Return empty on error, don't fail the whole process
+  }
+}
+
 // Helper function to generate specific document requests from structured entities
 // If entities are from prior year (2023), request current year (2024) equivalents
 function generateDocumentRequestsFromEntities(entities: TaxEntities): StructuredDocumentRequest[] {
@@ -511,7 +634,8 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
         name: `W-2 from ${employer.name} for ${targetYear}`,
         documentType: "W-2",
         year: targetYear,
-        entity: employer.name
+        entity: employer.name,
+        provenance: employer.provenance
       });
     });
   }
@@ -524,7 +648,8 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
         name: `${payer.type} from ${payer.name} for ${targetYear}`,
         documentType: payer.type,
         year: targetYear,
-        entity: payer.name
+        entity: payer.name,
+        provenance: payer.provenance
       });
     });
   }
@@ -536,7 +661,8 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
       name: `Schedule C for ${entities.scheduleC.businessName} (${targetYear})`,
       documentType: "Schedule C",
       year: targetYear,
-      entity: entities.scheduleC.businessName
+      entity: entities.scheduleC.businessName,
+      provenance: entities.scheduleC.provenance
     });
   }
 
@@ -548,7 +674,8 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
       name: `Schedule E for ${property} (${targetYear})`,
       documentType: "Schedule E",
       year: targetYear,
-      entity: property
+      entity: property,
+      provenance: entities.scheduleE.provenance
     });
   }
 
@@ -560,7 +687,8 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
         name: `Schedule K-1 from ${k1.entityName} (${k1.entityType}) for ${targetYear}`,
         documentType: "Schedule K-1",
         year: targetYear,
-        entity: `${k1.entityName} (${k1.entityType})`
+        entity: `${k1.entityName} (${k1.entityType})`,
+        provenance: k1.provenance
       });
     });
   }
@@ -573,7 +701,8 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
       name: `Form 1098 from ${lender} for ${targetYear}`,
       documentType: "Form 1098",
       year: targetYear,
-      entity: lender
+      entity: lender,
+      provenance: entities.form1098.provenance
     });
   }
 
