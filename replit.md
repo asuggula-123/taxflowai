@@ -33,6 +33,12 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
       - Intake-specific chat history
     - **Customer Details**: id, intakeId, category, label, value, createdAt
       - Intake-specific customer details
+    - **Firm Settings**: id, notes, createdAt, updatedAt
+      - Global firm-level settings and instructions
+    - **Memories**: id, customerId (nullable), content, createdAt
+      - Firm-level memories (customerId = null) for universal rules
+      - Customer-level memories (customerId set) for client-specific facts
+      - Provides audit trail before synthesis into notes
 
 ### Feature Specifications
 - **Customer Management**: CRUD operations for customers.
@@ -62,7 +68,27 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 
 ## Recent Updates (October 2025)
 
-### Multi-Year Intake System (Latest)
+### Two-Level Memory System (Latest)
+- **Architecture**: Hybrid memory approach with individual Memory entities for audit trail and synthesized notes for clean AI context
+  - Firm-level memories (customerId = null) for universal rules and standing instructions
+  - Customer-level memories (customerId set) for client-specific facts and preferences
+- **Memory Detection**: AI analyzes conversations with high bar criteria (universal rules, material facts, recurring patterns only)
+  - Distinguishes firm vs customer memories based on conversation context
+  - Returns detectedMemories array in chat responses for frontend confirmation
+- **Memory Synthesis**: Converts individual Memory entities into organized prose notes via AI
+  - POST /api/memories/synthesize endpoint processes memories at appropriate level
+  - Synthesis updates firm settings notes or customer notes based on memory type
+- **Firm Settings Page**: /settings route with editable global firm notes
+  - Sophisticated concurrent edit handling preserves unsaved text during saves
+  - Gated useEffect prevents refetch from overwriting in-progress edits
+  - Accurate unsaved change indicators track textarea state vs saved value
+- **Customer Notes UI**: Notes tab in CustomerSummary for customer-specific notes
+  - Same concurrent edit patterns as firm settings
+  - Separate from tax year intake notes for broader customer context
+- **AI Context Integration**: Firm notes and customer notes included in AI chat context for contextually aware responses
+- **API Patterns**: Consistent `{ notes: string }` payloads with proper null handling across all notes endpoints
+
+### Multi-Year Intake System
 - **Architecture Overhaul**: Migrated from customer-centric to intake-centric architecture
   - Added TaxYearIntake table linking customers to year-specific workflows
   - All documents, messages, and details now linked to intakeId instead of customerId

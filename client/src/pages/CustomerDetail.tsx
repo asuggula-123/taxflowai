@@ -1,10 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DocumentList } from "@/components/DocumentList";
 import { CustomerDetailsPanel } from "@/components/CustomerDetailsPanel";
-import { ChatInterface } from "@/components/ChatInterface";
+import { ChatInterface, type DetectedMemory } from "@/components/ChatInterface";
 import { ArrowLeft } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -23,6 +23,9 @@ export default function CustomerDetail() {
   const customerId = params?.id || "";
   const year = params?.year || "";
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Track detected memories for each message - keyed by message ID
+  const [messageMemories, setMessageMemories] = useState<Record<string, DetectedMemory[]>>({});
   
   // Fetch the intake to get intakeId
   const { data: intake, isLoading: isLoadingIntake, isError: isIntakeError } = useQuery<TaxYearIntake | undefined>({
@@ -87,6 +90,7 @@ export default function CustomerDetail() {
   const messages = rawMessages.map((m: any) => ({
     ...m,
     timestamp: new Date(m.createdAt || Date.now()),
+    detectedMemories: messageMemories[m.id] || [],
   }));
 
   const sendMessageMutation = useMutation({
@@ -118,7 +122,15 @@ export default function CustomerDetail() {
       // Return context with temp ID for potential rollback
       return { tempId };
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
+      // Capture detected memories from AI response
+      if (data?.detectedMemories && data?.aiMessage?.id) {
+        setMessageMemories(prev => ({
+          ...prev,
+          [data.aiMessage.id]: data.detectedMemories
+        }));
+      }
+      
       // Invalidate to fetch the real messages (including AI response)
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "messages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
@@ -139,6 +151,15 @@ export default function CustomerDetail() {
         title: "Failed to send message",
         description: "Your message could not be sent. Please try again.",
         variant: "destructive",
+      });
+    },
+  });
+
+  const confirmMemoryMutation = useMutation({
+    mutationFn: async ({ content, type }: { content: string; type: 'firm' | 'customer' }) => {
+      return await apiRequest("POST", "/api/memories", {
+        customerId: type === 'customer' ? customerId : null,
+        content,
       });
     },
   });
@@ -194,6 +215,50 @@ export default function CustomerDetail() {
 
   const handleFileUpload = (files: FileList) => {
     uploadFilesMutation.mutate(files);
+  };
+
+  const handleConfirmMemory = (messageId: string, memory: DetectedMemory) => {
+    confirmMemoryMutation.mutate(
+      {
+        content: memory.content,
+        type: memory.type,
+      },
+      {
+        onSuccess: () => {
+          // Only remove the memory from UI after successful save
+          setMessageMemories(prev => {
+            const memories = prev[messageId] || [];
+            return {
+              ...prev,
+              [messageId]: memories.filter(m => m.content !== memory.content)
+            };
+          });
+          
+          toast({
+            title: "Memory saved",
+            description: "This information will be remembered for future interactions.",
+          });
+        },
+        onError: () => {
+          toast({
+            title: "Error",
+            description: "Failed to save memory. Please try again.",
+            variant: "destructive",
+          });
+        },
+      }
+    );
+  };
+
+  const handleDismissMemory = (messageId: string, memoryIndex: number) => {
+    // Remove this memory from the message's detected memories
+    setMessageMemories(prev => {
+      const memories = prev[messageId] || [];
+      return {
+        ...prev,
+        [messageId]: memories.filter((_, i) => i !== memoryIndex)
+      };
+    });
   };
 
   // Show loading while intake is being fetched
@@ -266,6 +331,10 @@ export default function CustomerDetail() {
             progressStep={currentStep}
             progressMessage={progressMessage}
             progressValue={progressValue}
+            customerId={customerId}
+            onConfirmMemory={handleConfirmMemory}
+            onDismissMemory={handleDismissMemory}
+            isConfirmingMemory={confirmMemoryMutation.isPending}
           />
           <div ref={messagesEndRef} />
         </div>

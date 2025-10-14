@@ -5,12 +5,20 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Send, FileText, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ProgressSteps, type ProgressStep } from "./ProgressSteps";
+import { MemoryConfirmation } from "./MemoryConfirmation";
+
+export interface DetectedMemory {
+  type: 'firm' | 'customer';
+  content: string;
+  reason: string;
+}
 
 export interface ChatMessage {
   id: string;
   sender: "accountant" | "ai";
   content: string;
   timestamp: Date;
+  detectedMemories?: DetectedMemory[];
 }
 
 interface ChatInterfaceProps {
@@ -23,6 +31,10 @@ interface ChatInterfaceProps {
   progressStep?: ProgressStep | null;
   progressMessage?: string;
   progressValue?: number;
+  customerId?: string;
+  onConfirmMemory?: (messageId: string, memory: DetectedMemory) => void;
+  onDismissMemory?: (messageId: string, memoryIndex: number) => void;
+  isConfirmingMemory?: boolean;
 }
 
 export function ChatInterface({
@@ -35,6 +47,10 @@ export function ChatInterface({
   progressStep = null,
   progressMessage = "",
   progressValue = 0,
+  customerId,
+  onConfirmMemory,
+  onDismissMemory,
+  isConfirmingMemory = false,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -76,29 +92,43 @@ export function ChatInterface({
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
           {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.sender === "accountant" ? "justify-end" : "justify-start"}`}
-              data-testid={`message-${message.id}`}
-            >
+            <div key={message.id} className="space-y-2">
               <div
-                className={`max-w-[80%] space-y-1 ${
-                  message.sender === "accountant" ? "items-end" : "items-start"
-                } flex flex-col`}
+                className={`flex ${message.sender === "accountant" ? "justify-end" : "justify-start"}`}
+                data-testid={`message-${message.id}`}
               >
-                <Card
-                  className={`p-3 ${
-                    message.sender === "accountant"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-card"
-                  }`}
+                <div
+                  className={`max-w-[80%] space-y-1 ${
+                    message.sender === "accountant" ? "items-end" : "items-start"
+                  } flex flex-col`}
                 >
-                  <p className="text-sm">{message.content}</p>
-                </Card>
-                <span className="text-xs text-muted-foreground">
-                  {formatTime(message.timestamp)}
-                </span>
+                  <Card
+                    className={`p-3 ${
+                      message.sender === "accountant"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-card"
+                    }`}
+                  >
+                    <p className="text-sm">{message.content}</p>
+                  </Card>
+                  <span className="text-xs text-muted-foreground">
+                    {formatTime(message.timestamp)}
+                  </span>
+                </div>
               </div>
+              {message.sender === "ai" && message.detectedMemories && message.detectedMemories.length > 0 && (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%]">
+                    <MemoryConfirmation
+                      memories={message.detectedMemories}
+                      customerId={customerId || null}
+                      onConfirm={(memory) => onConfirmMemory?.(message.id, memory)}
+                      onDismiss={(index) => onDismissMemory?.(message.id, index)}
+                      isPending={isConfirmingMemory}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           {isAiThinking && (
