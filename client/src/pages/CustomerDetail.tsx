@@ -203,7 +203,10 @@ export default function CustomerDetail() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="grid md:grid-cols-2 gap-4 p-4">
           <div className="space-y-4">
-            <DocumentList documents={documents} />
+            <DocumentList 
+              documents={documents} 
+              customerStatus={customer.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
+            />
           </div>
           <div className="space-y-4">
             <CustomerDetailsPanel details={details} />

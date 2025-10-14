@@ -12,7 +12,25 @@ interface CustomerDetailsPanelProps {
 }
 
 export function CustomerDetailsPanel({ details }: CustomerDetailsPanelProps) {
-  const categories = Array.from(new Set(details.map((d) => d.category)));
+  // Filter out internal/technical categories like TaxEntities (raw JSON)
+  const userFriendlyDetails = details.filter(
+    (d) => d.category.toUpperCase() !== "TAXENTITIES"
+  );
+  
+  const categories = Array.from(new Set(userFriendlyDetails.map((d) => d.category)));
+
+  if (userFriendlyDetails.length === 0) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-lg font-medium">Customer Details</h2>
+        <div className="text-center py-8">
+          <p className="text-sm text-muted-foreground">
+            No details extracted yet. Upload tax documents to populate this section.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -25,7 +43,7 @@ export function CustomerDetailsPanel({ details }: CustomerDetailsPanelProps) {
                 {category}
               </h3>
               <div className="space-y-2">
-                {details
+                {userFriendlyDetails
                   .filter((d) => d.category === category)
                   .map((detail, idx) => (
                     <div

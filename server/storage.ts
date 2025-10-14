@@ -60,24 +60,10 @@ export class MemStorage implements IStorage {
     const customer: Customer = {
       ...insertCustomer,
       id,
-      status: "Not Started",
+      status: "Awaiting Tax Return",
       createdAt: new Date(),
     };
     this.customers.set(id, customer);
-
-    // Create initial AI message for new customer
-    await this.createChatMessage({
-      customerId: id,
-      sender: "ai",
-      content: "Hello! I'll help you gather the necessary documents for this tax return. Let's start with last year's tax return. Please upload the 2023 tax return.",
-    });
-
-    // Create requested document for last year's return
-    await this.createDocument({
-      customerId: id,
-      name: "2023_tax_return.pdf",
-      status: "requested",
-    });
 
     return customer;
   }

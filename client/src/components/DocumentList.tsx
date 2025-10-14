@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FileText } from "lucide-react";
+import { FileText, AlertCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export type DocumentStatus = "requested" | "completed";
@@ -13,9 +13,10 @@ export interface Document {
 
 interface DocumentListProps {
   documents: Document[];
+  customerStatus?: "Awaiting Tax Return" | "Incomplete" | "Ready";
 }
 
-export function DocumentList({ documents }: DocumentListProps) {
+export function DocumentList({ documents, customerStatus }: DocumentListProps) {
   const getStatusColor = (status: DocumentStatus) => {
     return status === "completed"
       ? "bg-status-ready/10 text-status-ready border-status-ready/20"
@@ -31,6 +32,24 @@ export function DocumentList({ documents }: DocumentListProps) {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-medium">Documents</h2>
+      
+      {customerStatus === "Awaiting Tax Return" && (
+        <Card className="p-4 bg-primary/5 border-primary/20" data-testid="alert-awaiting-tax-return">
+          <div className="flex gap-3">
+            <AlertCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-medium text-primary">
+                First Step: Upload 2023 Tax Return
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Please upload the customer's complete 2023 Form 1040 tax return to begin. 
+                The system will validate it and unlock additional features.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+      
       <ScrollArea className="h-[300px]">
         <div className="space-y-2">
           {documents.length === 0 ? (
