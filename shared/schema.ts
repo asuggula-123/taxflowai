@@ -7,7 +7,7 @@ export const customers = pgTable("customers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   email: text("email").notNull(),
-  status: text("status").notNull().default("Not Started"),
+  status: text("status").notNull().default("Awaiting Tax Return"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

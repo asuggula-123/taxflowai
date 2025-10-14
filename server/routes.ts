@@ -48,6 +48,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = insertCustomerSchema.parse(req.body);
       const customer = await storage.createCustomer(validatedData);
+      
+      // Create initial AI message prompting for tax return upload
+      await storage.createChatMessage({
+        customerId: customer.id,
+        sender: "ai",
+        content: "Hello! To begin preparing your 2024 tax return, please upload your complete 2023 tax return (Form 1040). I'll review it to understand your tax situation and determine which supporting documents we'll need to collect."
+      });
+      
       res.status(201).json(customer);
     } catch (error) {
       res.status(400).json({ error: "Invalid customer data" });
