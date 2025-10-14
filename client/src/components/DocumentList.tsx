@@ -46,16 +46,16 @@ export interface Document {
 
 interface DocumentListProps {
   documents: Document[];
-  customerStatus?: "Awaiting Tax Return" | "Incomplete" | "Ready";
-  customerId?: string;
+  intakeStatus?: "Awaiting Tax Return" | "Incomplete" | "Ready";
+  intakeId?: string;
 }
 
 function AddEditDocumentDialog({ 
-  customerId,
+  intakeId,
   document,
   trigger 
 }: { 
-  customerId: string;
+  intakeId: string;
   document?: Document;
   trigger: React.ReactNode;
 }) {
@@ -77,10 +77,10 @@ function AddEditDocumentDialog({
 
   const createMutation = useMutation({
     mutationFn: async (data: { name: string; documentType: string; year: string; entity?: string }) => {
-      return await apiRequest("POST", `/api/customers/${customerId}/documents`, data);
+      return await apiRequest("POST", `/api/intakes/${intakeId}/documents`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       setOpen(false);
       toast({ title: "Document request created" });
       setDocumentType("");
@@ -94,7 +94,7 @@ function AddEditDocumentDialog({
       return await apiRequest("PATCH", `/api/documents/${document?.id}`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       setOpen(false);
       toast({ title: "Document request updated" });
     },
@@ -190,7 +190,7 @@ function AddEditDocumentDialog({
   );
 }
 
-export function DocumentList({ documents, customerStatus, customerId }: DocumentListProps) {
+export function DocumentList({ documents, intakeStatus, intakeId }: DocumentListProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -211,7 +211,7 @@ export function DocumentList({ documents, customerStatus, customerId }: Document
       return await apiRequest("DELETE", `/api/documents/${documentId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       toast({ title: "Document request deleted" });
     },
   });
@@ -312,10 +312,10 @@ export function DocumentList({ documents, customerStatus, customerId }: Document
         <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
       )}
       
-      {doc.status === "requested" && customerId && (
+      {doc.status === "requested" && intakeId && (
         <div className="flex gap-1 shrink-0">
           <AddEditDocumentDialog
-            customerId={customerId}
+            intakeId={intakeId}
             document={doc}
             trigger={
               <Button 
@@ -347,9 +347,9 @@ export function DocumentList({ documents, customerStatus, customerId }: Document
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Documents</h2>
-        {customerId && customerStatus !== "Awaiting Tax Return" && (
+        {intakeId && intakeStatus !== "Awaiting Tax Return" && (
           <AddEditDocumentDialog
-            customerId={customerId}
+            intakeId={intakeId}
             trigger={
               <Button size="sm" data-testid="button-add-document">
                 <Plus className="h-4 w-4 mr-1" />
@@ -360,7 +360,7 @@ export function DocumentList({ documents, customerStatus, customerId }: Document
         )}
       </div>
       
-      {customerStatus === "Awaiting Tax Return" && (
+      {intakeStatus === "Awaiting Tax Return" && (
         <Card className="p-4 bg-primary/5 border-primary/20" data-testid="alert-awaiting-tax-return">
           <div className="flex gap-3">
             <AlertCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
