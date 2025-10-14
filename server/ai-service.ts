@@ -63,7 +63,123 @@ interface NextStepsAnalysis {
   missingDocuments: string[];
   isComplete: boolean;
   message: string;
-  customerStatus: "Not Started" | "Incomplete" | "Ready";
+  customerStatus: "Awaiting Tax Return" | "Incomplete" | "Ready";
+}
+
+interface TaxReturnValidation {
+  isValid: boolean;
+  isForm1040: boolean;
+  isTaxYear2023: boolean;
+  taxpayerNameMatches: boolean;
+  extractedTaxpayerName?: string;
+  extractedTaxYear?: number;
+  errorMessage?: string;
+}
+
+export async function validateTaxReturn(
+  fileName: string,
+  filePath: string,
+  customerName: string
+): Promise<TaxReturnValidation> {
+  let uploadedFileId: string | null = null;
+  
+  try {
+    // Validate file exists and size
+    const stats = fs.statSync(filePath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    
+    if (fileSizeMB > 10) {
+      throw new Error(`File size (${fileSizeMB.toFixed(2)}MB) exceeds 10MB limit`);
+    }
+    
+    if (stats.size === 0) {
+      throw new Error("File is empty");
+    }
+
+    // Upload PDF to OpenAI Files API
+    const file = await openai.files.create({
+      file: fs.createReadStream(filePath),
+      purpose: "user_data",
+    });
+    
+    uploadedFileId = file.id;
+
+    // Validate the tax return using Responses API
+    const response = await openai.responses.create({
+      model: "gpt-5",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              file_id: file.id,
+            },
+            {
+              type: "input_text",
+              text: `You are a tax document validator. Analyze this document and validate it as a 2023 Form 1040 tax return.
+
+Customer name to match: "${customerName}"
+
+Validation criteria:
+1. Is this a Form 1040 (U.S. Individual Income Tax Return)?
+2. Is the tax year 2023?
+3. Does the taxpayer name on the return match "${customerName}"? (Be flexible with name matching - accept partial matches, different name orders, or middle name variations)
+
+Extract:
+- Document type (exact form name)
+- Tax year from the document
+- Taxpayer name(s) from the document
+
+Respond in JSON format:
+{
+  "isForm1040": true/false,
+  "isTaxYear2023": true/false,
+  "taxpayerNameMatches": true/false,
+  "extractedTaxpayerName": "Name as shown on form",
+  "extractedTaxYear": 2023,
+  "documentType": "Form 1040 or other",
+  "errorMessage": "Specific reason if validation fails (e.g., 'This is a Form W-2, not Form 1040', 'Tax year is 2024, not 2023', 'Taxpayer name John Smith does not match ${customerName}')"
+}
+
+Be precise and validate against actual document content.`
+            }
+          ]
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    });
+
+    const validation = JSON.parse(response.output_text || "{}");
+    
+    return {
+      isValid: validation.isForm1040 && validation.isTaxYear2023 && validation.taxpayerNameMatches,
+      isForm1040: validation.isForm1040 || false,
+      isTaxYear2023: validation.isTaxYear2023 || false,
+      taxpayerNameMatches: validation.taxpayerNameMatches || false,
+      extractedTaxpayerName: validation.extractedTaxpayerName,
+      extractedTaxYear: validation.extractedTaxYear,
+      errorMessage: validation.errorMessage
+    };
+  } catch (error: any) {
+    console.error("Tax return validation error:", error);
+    return {
+      isValid: false,
+      isForm1040: false,
+      isTaxYear2023: false,
+      taxpayerNameMatches: false,
+      errorMessage: error.message || "Failed to validate tax return"
+    };
+  } finally {
+    // Clean up uploaded file
+    if (uploadedFileId) {
+      try {
+        await openai.files.del(uploadedFileId);
+      } catch (error) {
+        console.error("Failed to delete uploaded file:", uploadedFileId);
+      }
+    }
+  }
 }
 
 export async function analyzeDocument(
