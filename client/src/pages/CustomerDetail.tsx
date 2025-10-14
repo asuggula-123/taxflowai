@@ -9,6 +9,7 @@ import { ArrowLeft } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useProgressWebSocket } from "@/hooks/use-progress-websocket";
 import type { Customer } from "@/components/CustomerList";
 import type { Document } from "@/components/DocumentList";
 import type { CustomerDetailItem } from "@/components/CustomerDetailsPanel";
@@ -20,6 +21,9 @@ export default function CustomerDetail() {
   const { toast } = useToast();
   const customerId = params?.id || "";
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // WebSocket for progress tracking
+  const { currentStep, message: progressMessage, progress: progressValue } = useProgressWebSocket(customerId);
 
   const { data: customer } = useQuery<Customer>({
     queryKey: ["/api/customers", customerId],
@@ -222,6 +226,9 @@ export default function CustomerDetail() {
             isUploading={uploadFilesMutation.isPending}
             isAiThinking={sendMessageMutation.isPending}
             customerStatus={customer.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
+            progressStep={currentStep}
+            progressMessage={progressMessage}
+            progressValue={progressValue}
           />
           <div ref={messagesEndRef} />
         </div>

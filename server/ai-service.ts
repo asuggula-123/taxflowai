@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { storage } from "./storage";
 import type { Document, CustomerDetail } from "@shared/schema";
 import fs from "fs";
+import { progressService } from "./progress-service";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -206,7 +207,8 @@ Be precise and validate against actual document content.`
 export async function analyzeDocument(
   fileName: string,
   filePath: string,
-  customerId: string
+  customerId: string,
+  uploadId?: string
 ): Promise<DocumentAnalysis> {
   let uploadedFileId: string | null = null;
   
@@ -317,6 +319,17 @@ IMPORTANT:
     const analysis: DocumentAnalysis = JSON.parse(
       response.output_text || "{}"
     );
+    
+    // Emit extracting progress
+    if (uploadId) {
+      progressService.sendProgress({
+        customerId,
+        uploadId,
+        step: "extracting",
+        message: "Extracting tax information...",
+        progress: 50
+      });
+    }
     
     // VALIDATION PASS: Check for missed entities (2nd pass for accuracy)
     if (analysis.entities && uploadedFileId) {

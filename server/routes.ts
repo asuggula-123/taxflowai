@@ -6,6 +6,8 @@ import { insertCustomerSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
 import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn } from "./ai-service";
+import { progressService } from "./progress-service";
+import { randomUUID } from "crypto";
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -98,15 +100,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/customers/:customerId/documents/upload", upload.array("files"), async (req, res) => {
+    // Generate unique upload ID for progress tracking (declared outside try-catch for error handling)
+    const uploadId = randomUUID();
+    const customerId = req.params.customerId;
+    
     try {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
         return res.status(400).json({ error: "No files uploaded" });
       }
 
+      // Emit initial progress
+      progressService.sendProgress({
+        customerId,
+        uploadId,
+        step: "uploading",
+        message: "Uploading documents...",
+        progress: 10
+      });
+
       // Check if customer is awaiting tax return validation
-      const customer = await storage.getCustomer(req.params.customerId);
+      const customer = await storage.getCustomer(customerId);
       if (!customer) {
+        // Emit error progress
+        progressService.sendProgress({
+          customerId,
+          uploadId,
+          step: "error",
+          message: "Customer not found",
+          progress: 0
+        });
         return res.status(404).json({ error: "Customer not found" });
       }
 
@@ -132,6 +155,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!validation.taxpayerNameMatches) {
             errorMsg += `The taxpayer name "${validation.extractedTaxpayerName || 'unknown'}" does not match the customer name "${customer.name}". `;
           }
+          
+          // Emit error progress
+          progressService.sendProgress({
+            customerId,
+            uploadId,
+            step: "error",
+            message: errorMsg,
+            progress: 0
+          });
           
           // Create AI message with error
           await storage.createChatMessage({
@@ -198,11 +230,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const matchedDocIds = new Set<string>();
 
       for (const file of files) {
+        // Emit analyzing progress
+        progressService.sendProgress({
+          customerId,
+          uploadId,
+          step: "analyzing",
+          message: "Analyzing document with AI...",
+          progress: 30
+        });
+
         // Analyze document with AI first
-        const analysis = await analyzeDocument(file.originalname, file.path, req.params.customerId);
+        const analysis = await analyzeDocument(file.originalname, file.path, customerId, uploadId);
         
         // If analysis failed, create error message and return error
         if (!analysis.isValid) {
+          // Emit error progress
+          progressService.sendProgress({
+            customerId,
+            uploadId,
+            step: "error",
+            message: analysis.feedback,
+            progress: 0
+          });
+          
           await storage.createChatMessage({
             customerId: req.params.customerId,
             sender: "ai",
@@ -213,6 +263,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         const uploadTokens = normalizeToTokens(file.originalname);
         
+        // Emit matching progress
+        progressService.sendProgress({
+          customerId,
+          uploadId,
+          step: "matching",
+          message: "Matching documents to requests...",
+          progress: 60
+        });
+
         // Find best matching requested document from available (unmatched) requests
         let bestMatch: typeof availableRequestedDocs[0] | null = null;
         let bestScore = 0;
@@ -278,6 +337,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         aiResponses.push(aiMessage);
       }
 
+      // Emit generating progress
+      progressService.sendProgress({
+        customerId,
+        uploadId,
+        step: "generating",
+        message: "Generating recommendations...",
+        progress: 80
+      });
+
       // Determine next steps after all documents are analyzed
       const nextSteps = await determineNextSteps(req.params.customerId);
       
@@ -316,10 +384,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Emit complete progress
+      progressService.sendProgress({
+        customerId,
+        uploadId,
+        step: "complete",
+        message: "Analysis complete!",
+        progress: 100
+      });
+
       res.status(201).json({ documents: uploadedDocs, aiResponses });
     } catch (error) {
       console.error("Upload error:", error);
-      res.status(500).json({ error: "Failed to upload documents" });
+      
+      // Always emit error progress to show accountants what went wrong
+      const customerId = req.params.customerId;
+      const errorMessage = error instanceof Error ? error.message : "An error occurred during upload";
+      
+      progressService.sendProgress({
+        customerId,
+        uploadId,
+        step: "error",
+        message: errorMessage,
+        progress: 0
+      });
+      
+      res.status(500).json({ error: errorMessage });
     }
   });
 

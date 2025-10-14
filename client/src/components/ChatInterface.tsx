@@ -4,6 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Send, FileText, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { ProgressSteps, type ProgressStep } from "./ProgressSteps";
 
 export interface ChatMessage {
   id: string;
@@ -19,6 +20,9 @@ interface ChatInterfaceProps {
   isUploading?: boolean;
   isAiThinking?: boolean;
   customerStatus?: "Awaiting Tax Return" | "Incomplete" | "Ready";
+  progressStep?: ProgressStep | null;
+  progressMessage?: string;
+  progressValue?: number;
 }
 
 export function ChatInterface({
@@ -28,6 +32,9 @@ export function ChatInterface({
   isUploading = false,
   isAiThinking = false,
   customerStatus,
+  progressStep = null,
+  progressMessage = "",
+  progressValue = 0,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -123,9 +130,15 @@ export function ChatInterface({
           onDragLeave={handleDragLeave}
           data-testid="dropzone-documents"
         >
-          {isUploading ? (
+          {isUploading && progressStep ? (
+            <ProgressSteps
+              currentStep={progressStep}
+              message={progressMessage}
+              progress={progressValue}
+            />
+          ) : isUploading ? (
             <>
-              <Loader2 className="h-8 w-8 mx-auto mb-2 text-primary animate-spin" />
+              <FileText className="h-8 w-8 mx-auto mb-2 text-primary" />
               <p className="text-sm text-primary font-medium">
                 Uploading and analyzing documents...
               </p>
