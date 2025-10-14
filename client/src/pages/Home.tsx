@@ -1,10 +1,12 @@
 import { AddCustomerDialog } from "@/components/AddCustomerDialog";
 import { CustomerList, Customer } from "@/components/CustomerList";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { Settings } from "lucide-react";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -79,7 +81,14 @@ export default function Home() {
       <header className="border-b sticky top-0 bg-background z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <h1 className="text-xl font-semibold">TaxFlow</h1>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <Link href="/settings">
+              <Button variant="ghost" size="icon" data-testid="button-settings">
+                <Settings className="h-5 w-5" />
+              </Button>
+            </Link>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 

@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Plus, FileText, Calendar } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Plus, FileText, Calendar, Save } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { AddIntakeModal } from "@/components/AddIntakeModal";
 import type { Customer } from "@/components/CustomerList";
 
@@ -21,7 +25,11 @@ export default function CustomerSummary() {
   const [, params] = useRoute("/customers/:id");
   const [, setLocation] = useLocation();
   const [isAddIntakeModalOpen, setIsAddIntakeModalOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const initialNotesRef = useRef("");
   const customerId = params?.id || "";
+  const { toast } = useToast();
 
   const { data: customer } = useQuery<Customer>({
     queryKey: ["/api/customers", customerId],
@@ -41,6 +49,67 @@ export default function CustomerSummary() {
     },
     enabled: !!customerId,
   });
+
+  const { data: customerNotes } = useQuery<{ notes: string }>({
+    queryKey: ["/api/customers", customerId, "notes"],
+    queryFn: async () => {
+      const response = await fetch(`/api/customers/${customerId}/notes`);
+      return response.json();
+    },
+    enabled: !!customerId,
+  });
+
+  useEffect(() => {
+    if (customerNotes && !hasUnsavedChanges) {
+      const serverNotes = customerNotes.notes || "";
+      setNotes(serverNotes);
+      initialNotesRef.current = serverNotes;
+    }
+  }, [customerNotes, hasUnsavedChanges]);
+
+  const updateNotesMutation = useMutation({
+    mutationFn: async (newNotes: string) => {
+      return await apiRequest("PUT", `/api/customers/${customerId}/notes`, { notes: newNotes });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update customer notes.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleNotesChange = (value: string) => {
+    setNotes(value);
+    setHasUnsavedChanges(value !== initialNotesRef.current);
+  };
+
+  const handleSaveNotes = () => {
+    const valueToBeSaved = notes;
+    updateNotesMutation.mutate(valueToBeSaved, {
+      onSuccess: () => {
+        initialNotesRef.current = valueToBeSaved;
+        
+        // Only reset if user hasn't typed more while saving
+        setNotes((currentNotes) => {
+          if (currentNotes === valueToBeSaved) {
+            setHasUnsavedChanges(false);
+            return valueToBeSaved;
+          }
+          // User typed more, keep their edits and maintain unsaved state
+          setHasUnsavedChanges(true);
+          return currentNotes;
+        });
+        
+        queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "notes"] });
+        toast({
+          title: "Notes saved",
+          description: "Customer notes have been updated successfully.",
+        });
+      },
+    });
+  };
 
   const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
     switch (status) {
@@ -96,61 +165,112 @@ export default function CustomerSummary() {
       </header>
 
       <main className="flex-1 overflow-auto p-6">
-        <div className="max-w-5xl mx-auto space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold">Tax Year Intakes</h2>
-              <p className="text-muted-foreground">Manage tax returns for different years</p>
-            </div>
-            <Button onClick={() => setIsAddIntakeModalOpen(true)} data-testid="button-add-intake">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Intake
-            </Button>
-          </div>
+        <div className="max-w-5xl mx-auto">
+          <Tabs defaultValue="intakes" className="space-y-6">
+            <TabsList data-testid="tabs-customer-summary">
+              <TabsTrigger value="intakes" data-testid="tab-intakes">Tax Year Intakes</TabsTrigger>
+              <TabsTrigger value="notes" data-testid="tab-notes">Customer Notes</TabsTrigger>
+            </TabsList>
 
-          {intakes.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-lg font-medium mb-2">No tax year intakes yet</p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Get started by adding a tax year intake
-                </p>
-                <Button onClick={() => setIsAddIntakeModalOpen(true)} data-testid="button-add-first-intake">
+            <TabsContent value="intakes" className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">Tax Year Intakes</h2>
+                  <p className="text-muted-foreground">Manage tax returns for different years</p>
+                </div>
+                <Button onClick={() => setIsAddIntakeModalOpen(true)} data-testid="button-add-intake">
                   <Plus className="h-4 w-4 mr-2" />
                   Add Intake
                 </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-4">
-              {intakes.map((intake) => (
-                <Card
-                  key={intake.id}
-                  className="cursor-pointer hover-elevate active-elevate-2"
-                  onClick={() => setLocation(`/customers/${customerId}/intakes/${intake.year}`)}
-                  data-testid={`card-intake-${intake.year}`}
-                >
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <Calendar className="h-5 w-5 text-muted-foreground" />
-                          <CardTitle className="text-xl">Tax Year {intake.year}</CardTitle>
-                          <Badge variant={getStatusVariant(intake.status)} data-testid={`status-${intake.year}`}>
-                            {intake.status}
-                          </Badge>
-                        </div>
-                        {intake.notes && (
-                          <CardDescription className="mt-2">{intake.notes}</CardDescription>
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
+              </div>
+
+              {intakes.length === 0 ? (
+                <Card>
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+                    <p className="text-lg font-medium mb-2">No tax year intakes yet</p>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Get started by adding a tax year intake
+                    </p>
+                    <Button onClick={() => setIsAddIntakeModalOpen(true)} data-testid="button-add-first-intake">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Intake
+                    </Button>
+                  </CardContent>
                 </Card>
-              ))}
-            </div>
-          )}
+              ) : (
+                <div className="grid gap-4">
+                  {intakes.map((intake) => (
+                    <Card
+                      key={intake.id}
+                      className="cursor-pointer hover-elevate active-elevate-2"
+                      onClick={() => setLocation(`/customers/${customerId}/intakes/${intake.year}`)}
+                      data-testid={`card-intake-${intake.year}`}
+                    >
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <Calendar className="h-5 w-5 text-muted-foreground" />
+                              <CardTitle className="text-xl">Tax Year {intake.year}</CardTitle>
+                              <Badge variant={getStatusVariant(intake.status)} data-testid={`status-${intake.year}`}>
+                                {intake.status}
+                              </Badge>
+                            </div>
+                            {intake.notes && (
+                              <CardDescription className="mt-2">{intake.notes}</CardDescription>
+                            )}
+                          </div>
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="notes" className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-bold mb-2">Customer Notes</h2>
+                <p className="text-muted-foreground">
+                  Material facts and recurring patterns specific to this taxpayer
+                </p>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Notes</CardTitle>
+                  <CardDescription>
+                    Track important customer-specific information (e.g., rental property ownership, self-employment status, recurring deductions)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Textarea
+                    data-testid="textarea-customer-notes"
+                    placeholder="e.g., Has rental property in Florida, Self-employed consultant, Always has charitable donations over $10k..."
+                    value={notes}
+                    onChange={(e) => handleNotesChange(e.target.value)}
+                    className="min-h-[300px] resize-none"
+                  />
+                  <div className="flex justify-end gap-2">
+                    {hasUnsavedChanges && (
+                      <p className="text-sm text-muted-foreground self-center" data-testid="text-unsaved">
+                        Unsaved changes
+                      </p>
+                    )}
+                    <Button
+                      data-testid="button-save-notes"
+                      onClick={handleSaveNotes}
+                      disabled={!hasUnsavedChanges || updateNotesMutation.isPending}
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      {updateNotesMutation.isPending ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </main>
 
