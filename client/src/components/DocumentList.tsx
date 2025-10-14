@@ -1,8 +1,9 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, AlertCircle, Plus, Pencil, Trash2 } from "lucide-react";
+import { FileText, AlertCircle, Plus, Pencil, Trash2, Info } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,7 @@ export interface Document {
   documentType?: string | null;
   year?: string | null;
   entity?: string | null;
+  provenance?: string | null; // JSON string: {page?: number, lineReference?: string, evidence: string}
 }
 
 interface DocumentListProps {
@@ -114,7 +116,7 @@ function AddEditDocumentDialog({
       name, 
       documentType, 
       year,
-      entity: entity || null
+      entity: entity || ""
     };
 
     if (document) {
@@ -273,7 +275,42 @@ export function DocumentList({ documents, customerStatus, customerId }: Document
         </p>
       </div>
       
-      <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+      {doc.provenance ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Info 
+                className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5 cursor-help" 
+                data-testid={`icon-provenance-${doc.id}`}
+              />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              {(() => {
+                try {
+                  const prov = JSON.parse(doc.provenance);
+                  return (
+                    <div className="space-y-1">
+                      {prov.lineReference && (
+                        <p className="text-xs font-medium">{prov.lineReference}</p>
+                      )}
+                      {prov.evidence && (
+                        <p className="text-xs text-muted-foreground">{prov.evidence}</p>
+                      )}
+                      {prov.page && (
+                        <p className="text-xs text-muted-foreground">Page {prov.page}</p>
+                      )}
+                    </div>
+                  );
+                } catch {
+                  return <p className="text-xs">Source information available</p>;
+                }
+              })()}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+      )}
       
       {doc.status === "requested" && customerId && (
         <div className="flex gap-1 shrink-0">

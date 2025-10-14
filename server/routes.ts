@@ -309,6 +309,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               documentType: docRequest.documentType,
               year: docRequest.year,
               entity: docRequest.entity || null,
+              provenance: docRequest.provenance ? JSON.stringify(docRequest.provenance) : null,
               status: "requested",
             });
           }
@@ -443,6 +444,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               documentType: docRequest.documentType,
               year: docRequest.year,
               entity: docRequest.entity || null,
+              provenance: docRequest.provenance ? JSON.stringify(docRequest.provenance) : null,
               status: "requested",
             });
           }

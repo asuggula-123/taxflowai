@@ -41,6 +41,7 @@ export const documents = pgTable("documents", {
   entity: text("entity"),
   status: text("status").notNull().default("requested"),
   filePath: text("file_path"),
+  provenance: text("provenance"), // JSON string: {page?: number, lineReference?: string, evidence: string}
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
