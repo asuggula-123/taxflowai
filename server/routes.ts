@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import multer from "multer";
-import { insertCustomerSchema, insertChatMessageSchema } from "@shared/schema";
+import { insertCustomerSchema, insertTaxYearIntakeSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
 import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn } from "./ai-service";
@@ -50,30 +50,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = insertCustomerSchema.parse(req.body);
       const customer = await storage.createCustomer(validatedData);
-      
-      // Create initial AI message prompting for tax return upload
-      await storage.createChatMessage({
-        customerId: customer.id,
-        sender: "ai",
-        content: "Hello! To begin preparing your 2024 tax return, please upload your complete 2023 tax return (Form 1040). I'll review it to understand your tax situation and determine which supporting documents we'll need to collect."
-      });
-      
       res.status(201).json(customer);
     } catch (error) {
       res.status(400).json({ error: "Invalid customer data" });
-    }
-  });
-
-  app.patch("/api/customers/:id/status", async (req, res) => {
-    try {
-      const { status } = req.body;
-      const customer = await storage.updateCustomerStatus(req.params.id, status);
-      if (!customer) {
-        return res.status(404).json({ error: "Customer not found" });
-      }
-      res.json(customer);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update customer status" });
     }
   });
 
@@ -89,25 +68,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Document routes
-  app.get("/api/customers/:customerId/documents", async (req, res) => {
+  // Tax year intake routes
+  app.get("/api/customers/:id/intakes", async (req, res) => {
     try {
-      const documents = await storage.getDocumentsByCustomer(req.params.customerId);
+      const intakes = await storage.getIntakesByCustomer(req.params.id);
+      res.json(intakes);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch intakes" });
+    }
+  });
+
+  app.get("/api/intakes/:id", async (req, res) => {
+    try {
+      const intake = await storage.getIntake(req.params.id);
+      if (!intake) {
+        return res.status(404).json({ error: "Intake not found" });
+      }
+      res.json(intake);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch intake" });
+    }
+  });
+
+  app.post("/api/customers/:id/intakes", async (req, res) => {
+    try {
+      const validatedData = insertTaxYearIntakeSchema.parse({
+        customerId: req.params.id,
+        ...req.body
+      });
+      const intake = await storage.createIntake(validatedData);
+      
+      // Create initial AI message prompting for tax return upload
+      const previousYear = parseInt(intake.year) - 1;
+      await storage.createChatMessage({
+        intakeId: intake.id,
+        sender: "ai",
+        content: `Hello! To begin preparing your ${intake.year} tax return, please upload your complete ${previousYear} tax return (Form 1040). I'll review it to understand your tax situation and determine which supporting documents we'll need to collect.`
+      });
+      
+      res.status(201).json(intake);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid intake data" });
+    }
+  });
+
+  app.patch("/api/intakes/:id/status", async (req, res) => {
+    try {
+      const { status } = req.body;
+      const intake = await storage.updateIntakeStatus(req.params.id, status);
+      if (!intake) {
+        return res.status(404).json({ error: "Intake not found" });
+      }
+      res.json(intake);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update intake status" });
+    }
+  });
+
+  app.delete("/api/intakes/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteIntake(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Intake not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete intake" });
+    }
+  });
+
+  // Document routes
+  app.get("/api/intakes/:intakeId/documents", async (req, res) => {
+    try {
+      const documents = await storage.getDocumentsByIntake(req.params.intakeId);
       res.json(documents);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch documents" });
     }
   });
 
-  app.post("/api/customers/:customerId/documents/upload", upload.array("files"), async (req, res) => {
+  app.post("/api/intakes/:intakeId/documents/upload", upload.array("files"), async (req, res) => {
     // Generate unique upload ID for progress tracking (declared outside try-catch for error handling)
     const uploadId = randomUUID();
-    const customerId = req.params.customerId;
+    const intakeId = req.params.intakeId;
     
     try {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
         return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      // Check if intake exists and get customer info for progress tracking
+      const intake = await storage.getIntake(intakeId);
+      if (!intake) {
+        return res.status(404).json({ error: "Intake not found" });
+      }
+
+      const customerId = intake.customerId;
+      const customer = await storage.getCustomer(customerId);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
       }
 
       // Emit initial progress
@@ -119,38 +179,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         progress: 10
       });
 
-      // Check if customer is awaiting tax return validation
-      const customer = await storage.getCustomer(customerId);
-      if (!customer) {
-        // Emit error progress
-        progressService.sendProgress({
-          customerId,
-          uploadId,
-          step: "error",
-          message: "Customer not found",
-          progress: 0
-        });
-        return res.status(404).json({ error: "Customer not found" });
-      }
-
-      // If customer is awaiting tax return, validate the first upload
-      if (customer.status === "Awaiting Tax Return") {
+      // If intake is awaiting tax return, validate the first upload
+      if (intake.status === "Awaiting Tax Return") {
         // Only validate the first file
         const firstFile = files[0];
         const validation = await validateTaxReturn(
           firstFile.originalname,
           firstFile.path,
-          customer.name
+          customer.name,
+          intake.year
         );
 
         if (!validation.isValid) {
+          // Calculate expected prior year dynamically
+          const expectedPriorYear = parseInt(intake.year) - 1;
+          
           // Create error message based on what failed
           let errorMsg = "Tax return validation failed: ";
           if (!validation.isForm1040) {
-            errorMsg += `This appears to be ${validation.extractedTaxYear ? 'a' : 'an'} ${validation.extractedTaxYear || ''} document, but we need a complete 2023 Form 1040 tax return. `;
+            errorMsg += `This appears to be ${validation.extractedTaxYear ? 'a' : 'an'} ${validation.extractedTaxYear || ''} document, but we need a complete ${expectedPriorYear} Form 1040 tax return. `;
           }
           if (!validation.isTaxYear2023) {
-            errorMsg += `The tax year is ${validation.extractedTaxYear || 'unknown'}, but we need the 2023 tax return. `;
+            errorMsg += `The tax year is ${validation.extractedTaxYear || 'unknown'}, but we need the ${expectedPriorYear} tax return. `;
           }
           if (!validation.taxpayerNameMatches) {
             errorMsg += `The taxpayer name "${validation.extractedTaxpayerName || 'unknown'}" does not match the customer name "${customer.name}". `;
@@ -167,9 +217,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Create AI message with error
           await storage.createChatMessage({
-            customerId: req.params.customerId,
+            intakeId: req.params.intakeId,
             sender: "ai",
-            content: `⚠️ ${errorMsg}\n\nPlease upload your complete 2023 Form 1040 tax return to continue.`
+            content: `⚠️ ${errorMsg}\n\nPlease upload your complete ${expectedPriorYear} Form 1040 tax return to continue.`
           });
 
           return res.status(400).json({ error: errorMsg });
@@ -225,7 +275,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Fetch requested documents once before processing files
-      const allDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+      const allDocs = await storage.getDocumentsByIntake(req.params.intakeId);
       let availableRequestedDocs = allDocs.filter((d) => d.status === "requested");
       const matchedDocIds = new Set<string>();
 
@@ -240,7 +290,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Analyze document with AI first
-        const analysis = await analyzeDocument(file.originalname, file.path, customerId, uploadId);
+        const analysis = await analyzeDocument(file.originalname, file.path, req.params.intakeId, uploadId);
         
         // If analysis failed, create error message and return error
         if (!analysis.isValid) {
@@ -254,7 +304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
           
           await storage.createChatMessage({
-            customerId: req.params.customerId,
+            intakeId: req.params.intakeId,
             sender: "ai",
             content: `⚠️ Failed to analyze ${file.originalname}: ${analysis.feedback}`,
           });
@@ -317,7 +367,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           // Create new document
           document = await storage.createDocument({
-            customerId: req.params.customerId,
+            intakeId: req.params.intakeId,
             name: file.originalname,
             status: "completed",
             filePath: file.path,
@@ -330,7 +380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Create AI response message for successful analysis
         const aiMessage = await storage.createChatMessage({
-          customerId: req.params.customerId,
+          intakeId: req.params.intakeId,
           sender: "ai",
           content: analysis.feedback,
         });
@@ -347,14 +397,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Determine next steps after all documents are analyzed
-      const nextSteps = await determineNextSteps(req.params.customerId);
+      const nextSteps = await determineNextSteps(req.params.intakeId);
       
-      // Update customer status
-      await storage.updateCustomerStatus(req.params.customerId, nextSteps.customerStatus);
+      // Update intake status
+      await storage.updateIntakeStatus(req.params.intakeId, nextSteps.customerStatus);
 
       // Always create next steps message
       await storage.createChatMessage({
-        customerId: req.params.customerId,
+        intakeId: req.params.intakeId,
         sender: "ai",
         content: nextSteps.message,
       });
@@ -362,7 +412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create requested documents for missing items
       if (nextSteps.missingDocuments.length > 0) {
         // Get all existing documents to check for duplicates
-        const allExistingDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+        const allExistingDocs = await storage.getDocumentsByIntake(req.params.intakeId);
         
         for (const docRequest of nextSteps.missingDocuments) {
           // Check if this requested document already exists
@@ -372,7 +422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!alreadyExists) {
             await storage.createDocument({
-              customerId: req.params.customerId,
+              intakeId: req.params.intakeId,
               name: docRequest.name,
               documentType: docRequest.documentType,
               year: docRequest.year,
@@ -398,7 +448,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Upload error:", error);
       
       // Always emit error progress to show accountants what went wrong
-      const customerId = req.params.customerId;
+      const intake = await storage.getIntake(req.params.intakeId);
+      const customerId = intake?.customerId || req.params.intakeId;
       const errorMessage = error instanceof Error ? error.message : "An error occurred during upload";
       
       progressService.sendProgress({
@@ -414,7 +465,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Manual document request creation (for accountants to add documents)
-  app.post("/api/customers/:customerId/documents", async (req, res) => {
+  app.post("/api/intakes/:intakeId/documents", async (req, res) => {
     try {
       const { name, documentType, year, entity } = req.body;
       
@@ -423,7 +474,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const document = await storage.createDocument({
-        customerId: req.params.customerId,
+        intakeId: req.params.intakeId,
         name,
         documentType,
         year,
@@ -478,42 +529,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Chat message routes
-  app.get("/api/customers/:customerId/messages", async (req, res) => {
+  app.get("/api/intakes/:intakeId/messages", async (req, res) => {
     try {
-      const messages = await storage.getChatMessagesByCustomer(req.params.customerId);
+      const messages = await storage.getChatMessagesByIntake(req.params.intakeId);
       res.json(messages);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch messages" });
     }
   });
 
-  app.post("/api/customers/:customerId/messages", async (req, res) => {
+  app.post("/api/intakes/:intakeId/messages", async (req, res) => {
     try {
-      // Check customer status before allowing chat
-      const customer = await storage.getCustomer(req.params.customerId);
-      if (!customer) {
-        return res.status(404).json({ error: "Customer not found" });
+      // Check intake status before allowing chat
+      const intake = await storage.getIntake(req.params.intakeId);
+      if (!intake) {
+        return res.status(404).json({ error: "Intake not found" });
       }
 
       // Enforce workflow gate: chat is only available after tax return validation
-      if (customer.status === "Awaiting Tax Return") {
+      if (intake.status === "Awaiting Tax Return") {
+        const expectedPriorYear = parseInt(intake.year) - 1;
         return res.status(403).json({ 
-          error: "Chat is disabled. Please upload and validate the customer's 2023 tax return first." 
+          error: `Chat is disabled. Please upload and validate the customer's ${expectedPriorYear} tax return first.` 
         });
       }
 
       const validatedData = insertChatMessageSchema.parse({
         ...req.body,
-        customerId: req.params.customerId,
+        intakeId: req.params.intakeId,
       });
       
       // Create accountant message
       const message = await storage.createChatMessage(validatedData);
 
       // Generate AI response (returns structured data with message and requested documents)
-      const aiResponse = await generateChatResponse(validatedData.content, req.params.customerId);
+      const aiResponse = await generateChatResponse(validatedData.content, req.params.intakeId);
       const aiMessage = await storage.createChatMessage({
-        customerId: req.params.customerId,
+        intakeId: req.params.intakeId,
         sender: "ai",
         content: aiResponse.message,
       });
@@ -521,7 +573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create requested document entities if any
       if (aiResponse.requestedDocuments.length > 0) {
         // Get all existing documents to check for duplicates
-        const allExistingDocs = await storage.getDocumentsByCustomer(req.params.customerId);
+        const allExistingDocs = await storage.getDocumentsByIntake(req.params.intakeId);
         
         for (const docRequest of aiResponse.requestedDocuments) {
           // Check if a document with this name already exists (in any status)
@@ -529,7 +581,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!alreadyExists) {
             await storage.createDocument({
-              customerId: req.params.customerId,
+              intakeId: req.params.intakeId,
               name: docRequest.name,
               documentType: docRequest.documentType,
               year: docRequest.year,
@@ -549,9 +601,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Customer details routes
-  app.get("/api/customers/:customerId/details", async (req, res) => {
+  app.get("/api/intakes/:intakeId/details", async (req, res) => {
     try {
-      const details = await storage.getCustomerDetails(req.params.customerId);
+      const details = await storage.getCustomerDetailsByIntake(req.params.intakeId);
       res.json(details);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch customer details" });

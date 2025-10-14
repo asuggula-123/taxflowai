@@ -101,7 +101,8 @@ interface TaxReturnValidation {
 export async function validateTaxReturn(
   fileName: string,
   filePath: string,
-  customerName: string
+  customerName: string,
+  intakeYear: string
 ): Promise<TaxReturnValidation> {
   let uploadedFileId: string | null = null;
   
@@ -126,6 +127,9 @@ export async function validateTaxReturn(
     
     uploadedFileId = file.id;
 
+    // Calculate the expected prior year (intake year - 1)
+    const expectedPriorYear = parseInt(intakeYear) - 1;
+
     // Validate the tax return using Responses API
     const response = await openai.responses.create({
       model: "gpt-5",
@@ -139,13 +143,13 @@ export async function validateTaxReturn(
             },
             {
               type: "input_text",
-              text: `You are a tax document validator. Analyze this document and validate it as a 2023 Form 1040 tax return.
+              text: `You are a tax document validator. Analyze this document and validate it as a ${expectedPriorYear} Form 1040 tax return.
 
 Customer name to match: "${customerName}"
 
 Validation criteria:
 1. Is this a Form 1040 (U.S. Individual Income Tax Return)?
-2. Is the tax year 2023?
+2. Is the tax year ${expectedPriorYear}?
 3. Does the taxpayer name on the return match "${customerName}"? (Be flexible with name matching - accept partial matches, different name orders, or middle name variations)
 
 Extract:
@@ -159,9 +163,9 @@ Respond in JSON format:
   "isTaxYear2023": true/false,
   "taxpayerNameMatches": true/false,
   "extractedTaxpayerName": "Name as shown on form",
-  "extractedTaxYear": 2023,
+  "extractedTaxYear": ${expectedPriorYear},
   "documentType": "Form 1040 or other",
-  "errorMessage": "Specific reason if validation fails (e.g., 'This is a Form W-2, not Form 1040', 'Tax year is 2024, not 2023', 'Taxpayer name John Smith does not match ${customerName}')"
+  "errorMessage": "Specific reason if validation fails (e.g., 'This is a Form W-2, not Form 1040', 'Tax year is ${expectedPriorYear + 1}, not ${expectedPriorYear}', 'Taxpayer name John Smith does not match ${customerName}')"
 }
 
 Be precise and validate against actual document content.`
@@ -207,12 +211,19 @@ Be precise and validate against actual document content.`
 export async function analyzeDocument(
   fileName: string,
   filePath: string,
-  customerId: string,
+  intakeId: string,
   uploadId?: string
 ): Promise<DocumentAnalysis> {
   let uploadedFileId: string | null = null;
   
   try {
+    // Get intake and customer for progress tracking
+    const intake = await storage.getIntake(intakeId);
+    if (!intake) {
+      throw new Error("Intake not found");
+    }
+    const customerId = intake.customerId;
+    
     // Validate file exists and size
     const stats = fs.statSync(filePath);
     const fileSizeMB = stats.size / (1024 * 1024);
@@ -391,7 +402,7 @@ IMPORTANT:
 
     // Merge new entities with existing ones (accumulate across uploads)
     if (analysis.entities) {
-      const existingEntitiesDetail = (await storage.getCustomerDetails(customerId))
+      const existingEntitiesDetail = (await storage.getCustomerDetailsByIntake(intakeId))
         .find(d => d.category === "TaxEntities" && d.label === "StructuredEntities");
       
       // Start with existing entities to preserve all data, then overlay new data
@@ -493,7 +504,7 @@ IMPORTANT:
       }
       
       await storage.upsertCustomerDetail({
-        customerId,
+        intakeId,
         category: "TaxEntities",
         label: "StructuredEntities",
         value: JSON.stringify(mergedEntities),
@@ -504,7 +515,7 @@ IMPORTANT:
     if (analysis.extractedDetails) {
       for (const detail of analysis.extractedDetails) {
         await storage.upsertCustomerDetail({
-          customerId,
+          intakeId,
           category: detail.category,
           label: detail.label,
           value: detail.value,
@@ -723,10 +734,10 @@ function generateDocumentRequestsFromEntities(entities: TaxEntities): Structured
 }
 
 export async function determineNextSteps(
-  customerId: string
+  intakeId: string
 ): Promise<NextStepsAnalysis> {
-  const documents = await storage.getDocumentsByCustomer(customerId);
-  const details = await storage.getCustomerDetails(customerId);
+  const documents = await storage.getDocumentsByIntake(intakeId);
+  const details = await storage.getCustomerDetailsByIntake(intakeId);
 
   const completedDocs = documents.filter((d) => d.status === "completed");
   const requestedDocs = documents.filter((d) => d.status === "requested");
@@ -900,12 +911,17 @@ interface ChatResponseResult {
 
 export async function generateChatResponse(
   userMessage: string,
-  customerId: string
+  intakeId: string
 ): Promise<ChatResponseResult> {
-  const customer = await storage.getCustomer(customerId);
-  const documents = await storage.getDocumentsByCustomer(customerId);
-  const details = await storage.getCustomerDetails(customerId);
-  const messages = await storage.getChatMessagesByCustomer(customerId);
+  const intake = await storage.getIntake(intakeId);
+  if (!intake) {
+    throw new Error("Intake not found");
+  }
+  
+  const customer = await storage.getCustomer(intake.customerId);
+  const documents = await storage.getDocumentsByIntake(intakeId);
+  const details = await storage.getCustomerDetailsByIntake(intakeId);
+  const messages = await storage.getChatMessagesByIntake(intakeId);
 
   const context = `
 Customer: ${customer?.name}
