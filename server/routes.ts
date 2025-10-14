@@ -68,6 +68,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer notes routes
+  app.get("/api/customers/:id/notes", async (req, res) => {
+    try {
+      const customer = await storage.getCustomer(req.params.id);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      res.json({ notes: customer.notes || "" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch customer notes" });
+    }
+  });
+
+  app.put("/api/customers/:id/notes", async (req, res) => {
+    try {
+      const { notes } = req.body;
+      const customer = await storage.updateCustomerNotes(req.params.id, notes);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      res.json({ notes: customer.notes || "" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update customer notes" });
+    }
+  });
+
+  // Firm settings routes
+  app.get("/api/firm/settings", async (req, res) => {
+    try {
+      const settings = await storage.getFirmSettings();
+      res.json({ notes: settings?.notes || "" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch firm settings" });
+    }
+  });
+
+  app.put("/api/firm/settings", async (req, res) => {
+    try {
+      const { notes } = req.body;
+      const settings = await storage.updateFirmSettings(notes);
+      res.json({ notes: settings?.notes || "" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update firm settings" });
+    }
+  });
+
+  // Memory routes
+  app.get("/api/memories", async (req, res) => {
+    try {
+      const type = req.query.type as 'firm' | 'customer' | undefined;
+      const customerId = req.query.customerId as string | undefined;
+      const memories = await storage.getMemories(type, customerId);
+      res.json(memories);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch memories" });
+    }
+  });
+
+  app.post("/api/memories", async (req, res) => {
+    try {
+      const memory = await storage.createMemory(req.body);
+      res.status(201).json(memory);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid memory data" });
+    }
+  });
+
+  app.delete("/api/memories/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteMemory(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Memory not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete memory" });
+    }
+  });
+
   // Tax year intake routes
   app.get("/api/customers/:id/intakes", async (req, res) => {
     try {
