@@ -74,12 +74,10 @@ export default function CustomerDetail() {
       // Cancel any outgoing refetches to avoid optimistic update being overwritten
       await queryClient.cancelQueries({ queryKey: ["/api/customers", customerId, "messages"] });
 
-      // Snapshot the previous value
-      const previousMessages = queryClient.getQueryData(["/api/customers", customerId, "messages"]);
-
       // Optimistically update to show user's message immediately
+      const tempId = `temp-${Date.now()}`;
       const optimisticMessage = {
-        id: `temp-${Date.now()}`,
+        id: tempId,
         customerId,
         sender: "accountant" as const,
         content,
@@ -91,8 +89,8 @@ export default function CustomerDetail() {
         (old: any[] = []) => [...old, optimisticMessage]
       );
 
-      // Return context with previous messages for potential rollback
-      return { previousMessages };
+      // Return context with temp ID for potential rollback
+      return { tempId };
     },
     onSuccess: () => {
       // Invalidate to fetch the real messages (including AI response)
@@ -101,14 +99,21 @@ export default function CustomerDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "details"] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId] });
     },
-    onError: (_err, _variables, context) => {
-      // Rollback to previous messages on error
-      if (context?.previousMessages) {
+    onError: (err, _variables, context) => {
+      // Remove only the specific failed message, preserving other messages
+      if (context?.tempId) {
         queryClient.setQueryData(
           ["/api/customers", customerId, "messages"],
-          context.previousMessages
+          (old: any[] = []) => old.filter((msg) => msg.id !== context.tempId)
         );
       }
+      
+      // Show error to user
+      toast({
+        title: "Failed to send message",
+        description: "Your message could not be sent. Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
