@@ -75,6 +75,13 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 - **Memory Detection**: AI analyzes conversations with high bar criteria (universal rules, material facts, recurring patterns only)
   - Distinguishes firm vs customer memories based on conversation context
   - Returns detectedMemories array in chat responses for frontend confirmation
+- **Inline Memory Confirmation UI**: MemoryConfirmation component displays detected memories in chat
+  - Shows inline after AI messages with Brain icon and content preview
+  - Visual badges distinguish "Firm-wide" vs "Customer-specific" memories
+  - Confirm button saves memory via POST /api/memories
+  - Dismiss button removes memory from UI without saving
+  - Robust error handling with isPending state, loading indicators, and toast notifications
+  - Memory removed from UI only on successful API response
 - **Memory Synthesis**: Converts individual Memory entities into organized prose notes via AI
   - POST /api/memories/synthesize endpoint processes memories at appropriate level
   - Synthesis updates firm settings notes or customer notes based on memory type
