@@ -325,7 +325,14 @@ export class MemStorage implements IStorage {
       memories = memories.filter(m => m.type === type);
     }
     
-    if (customerId) {
+    // For firm memories, we need to filter where customerId is null
+    // For customer memories, we need to filter where customerId matches
+    if (type === 'firm') {
+      memories = memories.filter(m => m.customerId === null);
+    } else if (type === 'customer' && customerId) {
+      memories = memories.filter(m => m.customerId === customerId);
+    } else if (customerId) {
+      // If no type specified but customerId provided, filter by customerId
       memories = memories.filter(m => m.customerId === customerId);
     }
     
