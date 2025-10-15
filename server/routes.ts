@@ -751,9 +751,46 @@ Current context:
 ${context}
 
 Instructions:
-1. Respond helpfully TO THE ACCOUNTANT (not to ${customer?.name})
-2. If they mention new income sources or tax obligations not in the document list, note them for document requests
-3. Always refer to the taxpayer as "${customer?.name}" or "the customer" - never address them directly`;
+
+1. Respond helpfully TO THE ACCOUNTANT (not to ${customer?.name}) in the "message" field
+
+2. If they mention new income sources or tax obligations not in the document list, create specific document requests for ${intake.year} in the "requestedDocuments" array
+
+3. Always refer to the taxpayer as "${customer?.name}" or "the customer" - never address them directly
+`;
+
+      // Define strict JSON schema for structured outputs
+      const responseSchema = {
+        type: "object" as const,
+        properties: {
+          message: {
+            type: "string" as const,
+            description: "Conversational response to the accountant"
+          },
+          requestedDocuments: {
+            type: "array" as const,
+            items: {
+              type: "object" as const,
+              properties: {
+                name: { type: "string" as const },
+                documentType: { type: "string" as const },
+                year: { type: "string" as const },
+                entity: { 
+                  anyOf: [
+                    { type: "string" as const },
+                    { type: "null" as const }
+                  ],
+                  description: "Entity name if applicable"
+                }
+              },
+              required: ["name", "documentType", "year", "entity"],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ["message", "requestedDocuments"],
+        additionalProperties: false
+      };
 
       const stream = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -761,20 +798,39 @@ Instructions:
           { role: "system", content: "You are a professional tax preparation AI assistant helping an accountant with their customer's taxes. You are speaking TO THE ACCOUNTANT, not to their customer. Always be clear about this distinction." },
           { role: "user", content: prompt },
         ],
+        response_format: { 
+          type: "json_schema",
+          json_schema: {
+            name: "chat_response",
+            strict: true,
+            schema: responseSchema
+          }
+        },
         stream: true,
       });
 
-      let fullMessage = "";
-      let requestedDocuments: any[] = [];
+      let fullResponse = "";
 
       // Stream response chunks
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || "";
         if (content) {
-          fullMessage += content;
-          res.write(`event: chunk\n`);
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          fullResponse += content;
         }
+      }
+
+      // Parse the structured response
+      const parsedResponse = JSON.parse(fullResponse);
+      const fullMessage = parsedResponse.message;
+      const requestedDocuments = parsedResponse.requestedDocuments || [];
+
+      console.log("Streaming: AI generated message:", fullMessage.substring(0, 100) + "...");
+      console.log("Streaming: Requested documents:", requestedDocuments);
+
+      // Stream message content character by character for smooth UX
+      for (const char of fullMessage) {
+        res.write(`event: chunk\n`);
+        res.write(`data: ${JSON.stringify({ content: char })}\n\n`);
       }
 
       // Save AI message
@@ -783,6 +839,29 @@ Instructions:
         sender: "ai",
         content: fullMessage,
       });
+
+      // Create requested document entities if any
+      if (requestedDocuments.length > 0) {
+        const allExistingDocs = await storage.getDocumentsByIntake(req.params.intakeId);
+        
+        for (const docRequest of requestedDocuments) {
+          const alreadyExists = allExistingDocs.some((d) => d.name === docRequest.name);
+          
+          if (!alreadyExists) {
+            console.log("Streaming: Creating document:", docRequest.name);
+            await storage.createDocument({
+              intakeId: req.params.intakeId,
+              name: docRequest.name,
+              documentType: docRequest.documentType,
+              year: docRequest.year,
+              entity: docRequest.entity || null,
+              status: "requested",
+            });
+          } else {
+            console.log("Streaming: Skipping duplicate document:", docRequest.name);
+          }
+        }
+      }
 
       // Emit complete event with AI message
       res.write(`event: complete\n`);
