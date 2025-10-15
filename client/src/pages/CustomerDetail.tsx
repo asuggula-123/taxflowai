@@ -171,30 +171,18 @@ export default function CustomerDetail() {
         formData.append("files", file);
       });
 
-      try {
-        const response = await fetch(`/api/intakes/${intakeId}/documents/upload`, {
-          method: "POST",
-          body: formData,
-        });
+      const response = await fetch(`/api/intakes/${intakeId}/documents/upload`, {
+        method: "POST",
+        body: formData,
+      });
 
-        if (!response.ok) {
-          // Parse error message from server response
-          try {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Upload failed");
-          } catch (parseError) {
-            // If response isn't JSON, use generic error
-            throw new Error("Upload failed. Please check your document and try again.");
-          }
-        }
-        return response.json();
-      } catch (error) {
-        // Handle network errors
-        if (error instanceof Error) {
-          throw error;
-        }
-        throw new Error("Network error. Please check your connection and try again.");
+      if (!response.ok) {
+        // Parse error message from server response
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Upload failed. Please check your document and try again.");
       }
+      
+      return response.json();
     },
     onMutate: () => {
       toast({

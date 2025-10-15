@@ -274,16 +274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Customer not found" });
       }
 
-      // Emit initial progress
-      progressService.sendProgress({
-        customerId,
-        uploadId,
-        step: "uploading",
-        message: "Uploading documents...",
-        progress: 10
-      });
-
-      // If intake is awaiting tax return, validate the first upload
+      // If intake is awaiting tax return, validate the first upload BEFORE emitting progress
       if (intake.status === "Awaiting Tax Return") {
         // Only validate the first file
         const firstFile = files[0];
@@ -310,15 +301,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             errorMsg += `The taxpayer name "${validation.extractedTaxpayerName || 'unknown'}" does not match the customer name "${customer.name}". `;
           }
           
-          // Emit error progress
-          progressService.sendProgress({
-            customerId,
-            uploadId,
-            step: "error",
-            message: errorMsg,
-            progress: 0
-          });
-          
           // Create AI message with error
           await storage.createChatMessage({
             intakeId: req.params.intakeId,
@@ -326,11 +308,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             content: `⚠️ ${errorMsg}\n\nPlease upload your complete ${expectedPriorYear} Form 1040 tax return to continue.`
           });
 
+          // Return error immediately without WebSocket progress
           return res.status(400).json({ error: errorMsg });
         }
 
         // Validation passed - continue with normal upload processing
       }
+
+      // Emit initial progress (after validation passes)
+      progressService.sendProgress({
+        customerId,
+        uploadId,
+        step: "uploading",
+        message: "Uploading documents...",
+        progress: 10
+      });
 
       const uploadedDocs = [];
       const aiResponses = [];
@@ -384,49 +376,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const matchedDocIds = new Set<string>();
 
       for (const file of files) {
-        // Emit validating progress
-        progressService.sendProgress({
-          customerId,
-          uploadId,
-          step: "validating",
-          message: "Validating document...",
-          progress: 20
-        });
-
-        // Quick validation first to give immediate feedback
-        const quickValidation = await quickValidateDocument(file.originalname, file.path);
-        
-        if (!quickValidation.isValid) {
-          const errorMsg = quickValidation.errorMessage || "Document validation failed";
-          
-          // Emit error progress
-          progressService.sendProgress({
-            customerId,
-            uploadId,
-            step: "error",
-            message: errorMsg,
-            progress: 0
-          });
-          
-          await storage.createChatMessage({
-            intakeId: req.params.intakeId,
-            sender: "ai",
-            content: `⚠️ ${errorMsg}`,
-          });
-          
-          return res.status(400).json({ error: errorMsg });
-        }
-
         // Emit analyzing progress
         progressService.sendProgress({
           customerId,
           uploadId,
           step: "analyzing",
           message: "Analyzing document with AI...",
-          progress: 40
+          progress: 30
         });
 
-        // Now do full analysis
+        // Analyze document with AI
         const analysis = await analyzeDocument(file.originalname, file.path, req.params.intakeId, uploadId);
         
         // If analysis failed, create error message and return error
