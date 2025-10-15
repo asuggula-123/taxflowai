@@ -222,10 +222,6 @@ export function DocumentList({ documents, intakeStatus, intakeId }: DocumentList
     }
   };
 
-  // Split documents by year
-  const contextDocs = documents.filter(doc => doc.year === "2023");
-  const neededDocs = documents.filter(doc => doc.year === "2024" || !doc.year);
-  
   const renderDocument = (doc: Document) => (
     <Card
       key={doc.id}
@@ -390,44 +386,10 @@ export function DocumentList({ documents, intakeStatus, intakeId }: DocumentList
       )}
       
       <ScrollArea className="h-[400px]">
-        <div className="space-y-6">
-          {/* Prior Year Context Documents (2023) */}
-          {contextDocs.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium text-muted-foreground">
-                  2023 Context Documents
-                </h3>
-                <div className="flex-1 h-px bg-border" />
-              </div>
-              <p className="text-xs text-muted-foreground mb-2">
-                Prior year documents analyzed to determine current year needs
-              </p>
-              <div className="space-y-2">
-                {contextDocs.map(renderDocument)}
-              </div>
-            </div>
-          )}
-
-          {/* Current Year Needed Documents (2024) */}
-          {neededDocs.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium">
-                  2024 Documents Needed
-                </h3>
-                <div className="flex-1 h-px bg-border" />
-              </div>
-              <p className="text-xs text-muted-foreground mb-2">
-                Documents to collect for 2024 tax return
-              </p>
-              <div className="space-y-2">
-                {neededDocs.map(renderDocument)}
-              </div>
-            </div>
-          )}
-
-          {documents.length === 0 && (
+        <div className="space-y-2">
+          {documents.length > 0 ? (
+            documents.map(renderDocument)
+          ) : (
             <div className="text-sm text-muted-foreground text-center py-8">
               No documents yet
             </div>

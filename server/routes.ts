@@ -325,6 +325,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
           openaiFileId = extraction.fileId;
           const cleanName = generateDocumentName(metadata);
           
+          // Validate taxpayer name matches customer
+          if (metadata.taxpayerName) {
+            // Token-based name matching: handles different orderings, middle initials, diacritics, etc.
+            const tokenizeName = (name: string): string[] => {
+              // Normalize Unicode (handle diacritics like José -> Jose)
+              const normalized = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+              // Replace punctuation (hyphens, apostrophes, commas, slashes) with spaces to preserve multi-part names
+              // This handles: "Mary-Anne", "O'Connor", "SMITH,JOHN", etc.
+              const spacified = normalized.replace(/[-',\/]/g, ' ');
+              // Extract tokens (words) from name, normalized and filtered
+              const tokens = spacified
+                .toLowerCase()
+                .replace(/[^a-z\s]/g, '') // Remove non-letters except spaces
+                .split(/\s+/)
+                .filter(token => token.length > 1); // Ignore single letters (initials)
+              return tokens;
+            };
+            
+            const extractedTokens = tokenizeName(metadata.taxpayerName);
+            const customerTokens = tokenizeName(customer.name);
+            
+            // Find common tokens
+            const extractedSet = new Set(extractedTokens);
+            const customerSet = new Set(customerTokens);
+            const commonTokens = extractedTokens.filter(t => customerSet.has(t));
+            
+            // Require either:
+            // 1. At least 2 matching tokens (e.g., both first and last name), OR
+            // 2. 100% match of all tokens (handles single-name edge cases)
+            const namesMatch = commonTokens.length >= 2 || 
+                              (extractedTokens.length === 1 && customerTokens.length === 1 && commonTokens.length === 1);
+            
+            if (!namesMatch) {
+              // Create warning message about taxpayer mismatch
+              await storage.createChatMessage({
+                intakeId: req.params.intakeId,
+                sender: "ai",
+                content: `⚠️ **Taxpayer Mismatch Detected**: This document appears to belong to "${metadata.taxpayerName}", but the customer on file is "${customer.name}". Please verify this is the correct document for this customer.`,
+              });
+            }
+          }
+          
           // Check for duplicates before processing
           const allExistingDocs = await storage.getDocumentsByIntake(req.params.intakeId);
           

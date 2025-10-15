@@ -102,6 +102,7 @@ export interface QuickDocumentMetadata {
   documentType: string;
   entity: string | null;
   year: string;
+  taxpayerName: string | null; // Name of person on document (for validation)
 }
 
 export interface QuickExtractionResult {
@@ -161,7 +162,7 @@ export async function quickExtractDocumentMetadata(
               text: `Extract basic metadata from this tax document for matching and naming purposes.
 
 Identify:
-1. Document type (e.g., "W-2", "1099-R", "1099-NEC", "Schedule K-1", "1040", "Form 8889", etc.)
+1. Document type (e.g., "W-2", "1099-R", "1099-NEC", "Schedule K-1", "1040", "Paystub/Earnings Statement", etc.)
 2. Entity name - this varies by document type:
    - For personal tax returns (Form 1040, 1040-SR): Use the PRIMARY TAXPAYER'S NAME (first name + last name, no middle initial)
    - For W-2: Use employer name
@@ -169,21 +170,30 @@ Identify:
    - For Schedule C: Use business name
    - For K-1: Use entity name
    - For 1098: Use lender name
+   - For paystubs: Use employer name
    - For other documents: Use relevant entity or null
 3. Tax year (4-digit year)
+4. Taxpayer name - Extract the name of the individual/person this document belongs to (first name + last name). This is for validation purposes.
+   - For W-2/paystubs: Employee name
+   - For 1099s: Recipient name
+   - For Form 1040: Primary taxpayer name
+   - For other personal documents: Person's name
+   - For business-only documents (Schedule C without owner name): null
 
 Respond in JSON format:
 {
   "documentType": "exact form name or type",
   "entity": "entity name (required for 1040s and most forms)",
-  "year": "YYYY"
+  "year": "YYYY",
+  "taxpayerName": "person's name or null if not applicable"
 }
 
 Examples:
-- W-2 from ACME Corp for 2024 → {"documentType": "W-2", "entity": "ACME Corp", "year": "2024"}
-- 1099-R from Vanguard for 2024 → {"documentType": "1099-R", "entity": "Vanguard", "year": "2024"}
-- Form 1040 for James Cavin in 2023 → {"documentType": "Form 1040", "entity": "James Cavin", "year": "2023"}
-- Foreign bank account statement → {"documentType": "Foreign Bank Account Statement", "entity": null, "year": "2024"}`
+- W-2 from ACME Corp for John Smith in 2024 → {"documentType": "W-2", "entity": "ACME Corp", "year": "2024", "taxpayerName": "John Smith"}
+- 1099-R from Vanguard for Jane Doe in 2024 → {"documentType": "1099-R", "entity": "Vanguard", "year": "2024", "taxpayerName": "Jane Doe"}
+- Form 1040 for James Cavin in 2023 → {"documentType": "Form 1040", "entity": "James Cavin", "year": "2023", "taxpayerName": "James Cavin"}
+- Paystub from RIPPLING for Sarah Johnson in 2025 → {"documentType": "Paystub", "entity": "RIPPLING", "year": "2025", "taxpayerName": "Sarah Johnson"}
+- Foreign bank account statement → {"documentType": "Foreign Bank Account Statement", "entity": null, "year": "2024", "taxpayerName": null}`
             }
           ]
         }
@@ -197,7 +207,8 @@ Examples:
       metadata: {
         documentType: metadata.documentType || "Unknown Document",
         entity: metadata.entity || null,
-        year: metadata.year || new Date().getFullYear().toString()
+        year: metadata.year || new Date().getFullYear().toString(),
+        taxpayerName: metadata.taxpayerName || null
       },
       fileId: file.id // Return file_id for reuse
     };
@@ -371,7 +382,12 @@ export async function analyzeDocument(
             },
             {
               type: "input_text",
-              text: `You are an expert tax preparation assistant. Analyze this tax document and extract STRUCTURED entities with PROVENANCE.
+              text: `You are an expert tax preparation assistant. Analyze this document and extract STRUCTURED entities with PROVENANCE.
+
+IMPORTANT: Mark documents as valid (isValid: true) if they are tax-related or supporting documents including:
+- Tax forms: Form 1040, W-2, 1099s, Schedule C/E, K-1, 1098, etc.
+- Supporting documents: Paystubs/earnings statements, bank statements, receipts, etc.
+- Only mark as invalid (isValid: false) if the document is corrupt, unreadable, or completely unrelated to taxes/finances
 
 Based on the ACTUAL DOCUMENT CONTENT, extract structured data:
 
@@ -427,7 +443,7 @@ Respond in JSON format:
     "itemizedDeductions": ["mortgage interest", "charitable donations"]
   },
   "extractedDetails": [{"category": "Personal Info|Income Sources|Deductions|Tax History", "label": "descriptive label", "value": "value"}],
-  "feedback": "specific confirmation of what you found"
+  "feedback": "For tax forms: Provide specific confirmation of what you found. For supporting documents (paystubs, bank statements, etc.): Acknowledge the document and explain its usefulness for tax preparation (e.g., 'Received paystub showing YTD earnings. This will help verify accuracy of year-end W-2 when received.')"
 }
 
 IMPORTANT: 
