@@ -5,7 +5,7 @@ import multer from "multer";
 import { insertCustomerSchema, insertTaxYearIntakeSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
-import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn, synthesizeMemoriesIntoNotes, detectMemories } from "./ai-service";
+import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn } from "./ai-service";
 import { progressService } from "./progress-service";
 import { randomUUID } from "crypto";
 import OpenAI from "openai";
@@ -114,105 +114,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ notes: settings?.notes || "" });
     } catch (error) {
       res.status(500).json({ error: "Failed to update firm settings" });
-    }
-  });
-
-  // Memory routes
-  app.get("/api/memories", async (req, res) => {
-    try {
-      const type = req.query.type as 'firm' | 'customer' | undefined;
-      const customerId = req.query.customerId as string | undefined;
-      const memories = await storage.getMemories(type, customerId);
-      res.json(memories);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch memories" });
-    }
-  });
-
-  app.post("/api/memories", async (req, res) => {
-    try {
-      console.log("POST /api/memories - Request body:", JSON.stringify(req.body, null, 2));
-      const memory = await storage.createMemory(req.body);
-      console.log("Memory created successfully:", {
-        id: memory.id,
-        type: memory.type,
-        customerId: memory.customerId,
-        content: memory.content.substring(0, 50) + "..."
-      });
-      res.status(201).json(memory);
-    } catch (error) {
-      console.error("Error creating memory:", error);
-      res.status(400).json({ error: "Invalid memory data" });
-    }
-  });
-
-  app.delete("/api/memories/:id", async (req, res) => {
-    try {
-      const deleted = await storage.deleteMemory(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Memory not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Failed to delete memory" });
-    }
-  });
-
-  // Debug endpoint to see all memories  
-  app.get("/api/memories/debug", async (req, res) => {
-    try {
-      const allMemories = await storage.getMemories();
-      console.log("\n=== DEBUG: ALL MEMORIES IN STORAGE ===");
-      console.log(`Total memories: ${allMemories.length}`);
-      allMemories.forEach(m => {
-        console.log(`- ID: ${m.id}`);
-        console.log(`  Type: ${m.type}`);
-        console.log(`  CustomerId: ${m.customerId}`);
-        console.log(`  Content: ${m.content}`);
-        console.log(`  Created: ${m.createdAt}`);
-      });
-      res.json({
-        count: allMemories.length,
-        memories: allMemories
-      });
-    } catch (error) {
-      console.error("Debug endpoint error:", error);
-      res.status(500).json({ error: "Failed to get debug info" });
-    }
-  });
-
-  // Memory synthesis endpoint
-  app.post("/api/memories/synthesize", async (req, res) => {
-    try {
-      const { type, customerId } = req.body;
-      
-      console.log("Synthesize request:", { type, customerId });
-      
-      // Fetch memories based on type and optional customerId
-      const memories = await storage.getMemories(type, customerId);
-      
-      console.log(`Found ${memories.length} memories to synthesize:`, memories.map(m => ({ 
-        type: m.type, 
-        content: m.content.substring(0, 50) + "...",
-        customerId: m.customerId 
-      })));
-      
-      // Synthesize memories into organized notes
-      const synthesizedNotes = await synthesizeMemoriesIntoNotes(memories);
-      
-      console.log("Synthesized notes:", synthesizedNotes ? synthesizedNotes.substring(0, 100) + "..." : "Empty");
-      
-      // Update the appropriate notes field
-      if (type === 'firm') {
-        await storage.updateFirmSettings(synthesizedNotes);
-      } else if (type === 'customer' && customerId) {
-        await storage.updateCustomerNotes(customerId, synthesizedNotes);
-      }
-      
-      res.json({ notes: synthesizedNotes });
-    } catch (error) {
-      console.error("Memory synthesis error:", error);
-      res.status(500).json({ error: "Failed to synthesize memories" });
     }
   });
 
@@ -747,9 +648,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: aiResponse.message,
       });
 
-      // Now detect memories with full context (accountant question + AI response)
-      const detectedMemories = await detectMemories(validatedData.content, aiResponse.message, req.params.intakeId);
-
       // Create requested document entities if any
       if (aiResponse.requestedDocuments.length > 0) {
         // Get all existing documents to check for duplicates
@@ -775,8 +673,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(201).json({ 
         message, 
-        aiMessage,
-        detectedMemories 
+        aiMessage
       });
     } catch (error) {
       console.error("Message error:", error);
@@ -887,18 +784,9 @@ Instructions:
         content: fullMessage,
       });
 
-      // Now detect memories with full context (accountant question + AI response)
-      const detectedMemories = await detectMemories(validatedData.content, fullMessage, req.params.intakeId);
-      
-      // Emit memories if any detected
-      if (detectedMemories.length > 0) {
-        res.write(`event: memories\n`);
-        res.write(`data: ${JSON.stringify({ detectedMemories })}\n\n`);
-      }
-
-      // Emit complete event with AI message and memories
+      // Emit complete event with AI message
       res.write(`event: complete\n`);
-      res.write(`data: ${JSON.stringify({ aiMessage, detectedMemories, requestedDocuments })}\n\n`);
+      res.write(`data: ${JSON.stringify({ aiMessage, requestedDocuments })}\n\n`);
 
       res.end();
     } catch (error) {
