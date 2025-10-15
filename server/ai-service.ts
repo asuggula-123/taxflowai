@@ -125,9 +125,9 @@ export function generateDocumentName(metadata: QuickDocumentMetadata): string {
     .replace(/\s+/g, '')
     .replace(/-/g, ''); // Remove hyphens (W-2 -> W2, 1099-R -> 1099R)
 
-  // Format: Entity_Year_DocumentType or DocumentType_Year if no entity
+  // Format: Entity_DocumentType_Year or DocumentType_Year if no entity
   if (cleanEntity) {
-    return `${cleanEntity}_${metadata.year}_${cleanType}`;
+    return `${cleanEntity}_${cleanType}_${metadata.year}`;
   } else {
     return `${cleanType}_${metadata.year}`;
   }
@@ -162,20 +162,27 @@ export async function quickExtractDocumentMetadata(
 
 Identify:
 1. Document type (e.g., "W-2", "1099-R", "1099-NEC", "Schedule K-1", "1040", "Form 8889", etc.)
-2. Entity name if applicable (employer name for W-2, payer name for 1099s, business name for Schedule C, entity name for K-1, lender name for 1098, etc.)
+2. Entity name - this varies by document type:
+   - For personal tax returns (Form 1040, 1040-SR): Use the PRIMARY TAXPAYER'S NAME (first name + last name, no middle initial)
+   - For W-2: Use employer name
+   - For 1099s: Use payer/issuer name  
+   - For Schedule C: Use business name
+   - For K-1: Use entity name
+   - For 1098: Use lender name
+   - For other documents: Use relevant entity or null
 3. Tax year (4-digit year)
 
 Respond in JSON format:
 {
   "documentType": "exact form name or type",
-  "entity": "entity name or null if not applicable",
+  "entity": "entity name (required for 1040s and most forms)",
   "year": "YYYY"
 }
 
 Examples:
 - W-2 from ACME Corp for 2024 → {"documentType": "W-2", "entity": "ACME Corp", "year": "2024"}
 - 1099-R from Vanguard for 2024 → {"documentType": "1099-R", "entity": "Vanguard", "year": "2024"}
-- Form 1040 for 2023 → {"documentType": "Form 1040", "entity": null, "year": "2023"}
+- Form 1040 for James Cavin in 2023 → {"documentType": "Form 1040", "entity": "James Cavin", "year": "2023"}
 - Foreign bank account statement → {"documentType": "Foreign Bank Account Statement", "entity": null, "year": "2024"}`
             }
           ]

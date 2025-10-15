@@ -3,8 +3,42 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 export interface CustomerDetailItem {
   label: string;
-  value: string | null;
+  value: any; // Can be string, number, object, or null
   category: string;
+}
+
+// Helper function to safely format any value for display
+function formatValueForDisplay(value: any): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  
+  if (typeof value === "string") {
+    return value;
+  }
+  
+  if (typeof value === "number") {
+    return value.toLocaleString();
+  }
+  
+  if (typeof value === "object") {
+    // If it's an object like {Salary: 51484.88, Commission: 0}
+    // Format it as "Salary: $51,484.88, Commission: $0"
+    const entries = Object.entries(value).filter(([_, v]) => v !== null && v !== undefined && v !== 0);
+    if (entries.length === 0) return "—";
+    
+    return entries
+      .map(([key, val]) => {
+        // Format currency values
+        if (typeof val === 'number') {
+          return `${key}: $${val.toLocaleString()}`;
+        }
+        return `${key}: ${val}`;
+      })
+      .join(", ");
+  }
+  
+  return String(value);
 }
 
 interface CustomerDetailsPanelProps {
@@ -55,7 +89,7 @@ export function CustomerDetailsPanel({ details }: CustomerDetailsPanelProps) {
                         {detail.label}
                       </span>
                       <span className="text-sm font-medium text-right">
-                        {detail.value || "—"}
+                        {formatValueForDisplay(detail.value)}
                       </span>
                     </div>
                   ))}
