@@ -996,33 +996,60 @@ ${customerNotes || "None"}
 Current context:
 ${context}
 
-Respond helpfully to the accountant and:
+Instructions:
 
-1. If they mention new income sources or tax obligations not in the document list, create specific document requests for ${intake.year}
-2. If the message contains information valuable for future tax preparation, detect it as a memory:
-   - Type "firm" for policies/processes that apply to all customers
-   - Type "customer" for recurring patterns or material facts about this specific taxpayer
+1. Respond helpfully to the accountant in the "message" field
 
-Respond in this exact JSON format:
-{
-  "message": "Your conversational response to the accountant",
-  "requestedDocuments": [
-    {
-      "name": "Specific document name (e.g., 'W-2 from Microsoft for ${intake.year}')",
-      "documentType": "Document type (e.g., 'W-2', '1099-NEC')",
-      "year": "${intake.year}",
-      "entity": "Entity name if applicable"
-    }
-  ],
-  "detectedMemories": [
-    {
-      "type": "firm" or "customer",
-      "content": "Concise, actionable information to remember",
-      "reason": "Why this should be remembered"
-    }
-  ]
-}
+2. If they mention new income sources or tax obligations not in the document list, create specific document requests for ${intake.year} in the "requestedDocuments" array
+
+3. Evaluate if the message contains information valuable for future tax preparation:
+   - If YES, populate "detectedMemories" array with:
+     * Type "firm" for policies/processes that apply to all customers
+     * Type "customer" for recurring patterns or material facts about this specific taxpayer
+   - If NO, leave "detectedMemories" as empty array
+
+IMPORTANT: Always evaluate for memories. If the accountant states a firm policy (e.g., "we always ask for X") or customer-specific fact, you MUST include it in detectedMemories - don't just acknowledge it in your message.
 `;
+
+  // Define strict JSON schema for structured outputs
+  const responseSchema = {
+    type: "object" as const,
+    properties: {
+      message: {
+        type: "string" as const,
+        description: "Conversational response to the accountant"
+      },
+      requestedDocuments: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            name: { type: "string" as const },
+            documentType: { type: "string" as const },
+            year: { type: "string" as const },
+            entity: { type: "string" as const }
+          },
+          required: ["name", "documentType", "year"],
+          additionalProperties: false
+        }
+      },
+      detectedMemories: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const, enum: ["firm", "customer"] },
+            content: { type: "string" as const },
+            reason: { type: "string" as const }
+          },
+          required: ["type", "content", "reason"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ["message", "requestedDocuments", "detectedMemories"],
+    additionalProperties: false
+  };
 
   try {
     const response = await openai.chat.completions.create({
@@ -1030,11 +1057,18 @@ Respond in this exact JSON format:
       messages: [
         {
           role: "system",
-          content: "You are a professional tax preparation assistant. Respond ONLY with valid JSON in the exact format requested.",
+          content: "You are a professional tax preparation assistant.",
         },
         { role: "user", content: prompt },
       ],
-      response_format: { type: "json_object" },
+      response_format: { 
+        type: "json_schema",
+        json_schema: {
+          name: "chat_response",
+          strict: true,
+          schema: responseSchema
+        }
+      },
     });
 
     const content = response.choices[0].message.content || "{}";
