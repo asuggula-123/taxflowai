@@ -16,10 +16,13 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 - **Backend**: Express with TypeScript, utilizing Multer for robust file uploads, Server-Sent Events for streaming responses.
 - **AI Integration**: Leverages OpenAI GPT-4o for streaming chat responses and GPT-4o-mini for parallel memory detection (~500ms). Uses OpenAI's Files API for content-based PDF analysis and `json_schema` structured outputs for guaranteed schema compliance.
 - **Data Model**: Core entities include Customers, Tax Year Intakes, Documents, Chat Messages, Customer Details, Firm Settings, and Memories. The system supports multi-year intakes, with documents and chat linked to specific tax year intakes.
-- **Streaming Architecture**: Server-Sent Events (SSE) enable real-time streaming with parallel memory detection:
-  - GPT-4o streams chat response chunks progressively
-  - GPT-4o-mini detects memories in parallel (~500ms completion)
-  - Memory badges appear mid-stream before full response completes
+- **Streaming Architecture**: Server-Sent Events (SSE) enable real-time streaming with context-aware memory detection:
+  - GPT-4o streams chat response chunks progressively via SSE events
+  - Frontend uses local React state for immediate chunk-by-chunk visual updates (ChatGPT-like experience)
+  - Each chunk triggers re-render via `setStreamingMessage` state update, ensuring smooth incremental text display
+  - GPT-4o-mini analyzes full conversation (accountant question + AI answer) for context-aware memory detection (~500ms)
+  - Memories filtered for relevance to accountant's specific question, ignoring incidental background context
+  - Memory badges appear after streaming completes to ensure accuracy
   - Precise cache management using temp ID refs prevents unintended message removal
 - **Structured Outputs**: AI responses use `json_schema` for guaranteed compliance, ensuring strict output formats for `message`, `requestedDocuments`, and `detectedMemories` arrays.
 

@@ -27,6 +27,9 @@ export default function CustomerDetail() {
   // Track detected memories for each message - keyed by message ID
   const [messageMemories, setMessageMemories] = useState<Record<string, DetectedMemory[]>>({});
   
+  // Track currently streaming message for immediate visual updates
+  const [streamingMessage, setStreamingMessage] = useState<{id: string; content: string} | null>(null);
+  
   // Fetch the intake to get intakeId
   const { data: intake, isLoading: isLoadingIntake, isError: isIntakeError } = useQuery<TaxYearIntake | undefined>({
     queryKey: ["/api/intakes", customerId, year],
@@ -87,7 +90,18 @@ export default function CustomerDetail() {
     enabled: !!intakeId,
   });
 
-  const messages = rawMessages.map((m: any) => ({
+  // Include streaming message if present
+  const allMessages = streamingMessage 
+    ? [...rawMessages, {
+        id: streamingMessage.id,
+        intakeId,
+        sender: "ai",
+        content: streamingMessage.content,
+        createdAt: new Date().toISOString(),
+      }]
+    : rawMessages;
+
+  const messages = allMessages.map((m: any) => ({
     ...m,
     timestamp: new Date(m.createdAt || Date.now()),
     detectedMemories: messageMemories[m.id] || [],
@@ -171,34 +185,10 @@ export default function CustomerDetail() {
               // Streaming chunk
               streamingContent += data.content;
               
-              // Update AI message optimistically with streaming content
-              if (aiMessageId) {
-                queryClient.setQueryData(
-                  ["/api/intakes", intakeId, "messages"],
-                  (old: any[] = []) => 
-                    old.map(msg => 
-                      msg.id === aiMessageId 
-                        ? { ...msg, content: streamingContent }
-                        : msg
-                    )
-                );
-              } else {
-                // Create temp AI message
+              // Create temp ID if needed
+              if (!aiMessageId) {
                 aiMessageId = `ai-temp-${Date.now()}`;
-                queryClient.setQueryData(
-                  ["/api/intakes", intakeId, "messages"],
-                  (old: any[] = []) => [
-                    ...old,
-                    {
-                      id: aiMessageId,
-                      intakeId,
-                      sender: "ai",
-                      content: streamingContent,
-                      createdAt: new Date().toISOString(),
-                    },
-                  ]
-                );
-
+                
                 // Apply pending memories if any
                 if (pendingMemories.length > 0) {
                   setMessageMemories(prev => ({
@@ -208,6 +198,12 @@ export default function CustomerDetail() {
                   pendingMemories = [];
                 }
               }
+              
+              // Update local state for immediate visual update (triggers re-render)
+              setStreamingMessage({
+                id: aiMessageId,
+                content: streamingContent
+              });
             }
 
             if (currentEvent === "complete") {
@@ -215,6 +211,9 @@ export default function CustomerDetail() {
               const finalMessage = data.aiMessage;
               const detectedMemories = data.detectedMemories || [];
               finalResult = { aiMessage: finalMessage, detectedMemories };
+
+              // Clear streaming message state
+              setStreamingMessage(null);
 
               // Show memories immediately
               if (detectedMemories.length > 0 && finalMessage?.id) {
@@ -224,13 +223,11 @@ export default function CustomerDetail() {
                 }));
               }
 
-              // Replace temp AI message with real persisted one
+              // Add real persisted message to cache
               // (temp accountant already replaced when accountant_message event arrived)
               queryClient.setQueryData(
                 ["/api/intakes", intakeId, "messages"],
-                (old: any[] = []) => 
-                  old.filter(msg => msg.id !== aiMessageId)
-                    .concat(finalMessage)
+                (old: any[] = []) => [...old, finalMessage]
               );
             }
           }
@@ -468,7 +465,7 @@ export default function CustomerDetail() {
             onSendMessage={handleSendMessage}
             onFileUpload={handleFileUpload}
             isUploading={uploadFilesMutation.isPending}
-            isAiThinking={sendMessageMutation.isPending}
+            isAiThinking={sendMessageMutation.isPending && !streamingMessage}
             customerStatus={intake.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
             progressStep={currentStep}
             progressMessage={progressMessage}
