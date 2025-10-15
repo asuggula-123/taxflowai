@@ -1103,16 +1103,25 @@ Customer-specific notes:
 ${customerNotes || "None"}
 `;
 
-  const prompt = `You are a helpful tax preparation assistant. We are preparing ${intake.year} tax returns. The accountant said: "${userMessage}"
+  const prompt = `You are a tax preparation AI assistant helping an ACCOUNTANT prepare their customer's tax returns.
+  
+IMPORTANT: You are talking TO THE ACCOUNTANT (not to the customer). The customer is ${customer?.name}.
+Never address the accountant by the customer's name. The accountant is asking you about their customer.
+
+We are preparing ${intake.year} tax returns for ${customer?.name}.
+
+The accountant just said: "${userMessage}"
 
 Current context:
 ${context}
 
 Instructions:
 
-1. Respond helpfully to the accountant in the "message" field
+1. Respond helpfully TO THE ACCOUNTANT (not to ${customer?.name}) in the "message" field
 
 2. If they mention new income sources or tax obligations not in the document list, create specific document requests for ${intake.year} in the "requestedDocuments" array
+
+3. Always refer to the taxpayer as "${customer?.name}" or "the customer" - never address them directly
 `;
 
   // Define strict JSON schema for structured outputs (detectedMemories handled separately)
@@ -1154,7 +1163,7 @@ Instructions:
       messages: [
         {
           role: "system",
-          content: "You are a professional tax preparation assistant.",
+          content: "You are a professional tax preparation AI assistant helping an accountant with their customer's taxes. You are speaking TO THE ACCOUNTANT, not to their customer. Always be clear about this distinction.",
         },
         { role: "user", content: prompt },
       ],
