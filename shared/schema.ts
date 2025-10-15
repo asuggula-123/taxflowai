@@ -77,15 +77,6 @@ export const firmSettings = pgTable("firm_settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const memories = pgTable("memories", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  type: text("type").notNull(), // "firm" | "customer"
-  content: text("content").notNull(),
-  customerId: varchar("customer_id").references(() => customers.id),
-  intakeId: varchar("intake_id").references(() => taxYearIntakes.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
 export const insertCustomerSchema = createInsertSchema(customers).omit({
   id: true,
   createdAt: true,
@@ -117,11 +108,6 @@ export const insertFirmSettingsSchema = createInsertSchema(firmSettings).omit({
   updatedAt: true,
 });
 
-export const insertMemorySchema = createInsertSchema(memories).omit({
-  id: true,
-  createdAt: true,
-});
-
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Customer = typeof customers.$inferSelect;
 export type InsertTaxYearIntake = z.infer<typeof insertTaxYearIntakeSchema>;
@@ -134,5 +120,3 @@ export type InsertCustomerDetail = z.infer<typeof insertCustomerDetailSchema>;
 export type CustomerDetail = typeof customerDetails.$inferSelect;
 export type InsertFirmSettings = z.infer<typeof insertFirmSettingsSchema>;
 export type FirmSettings = typeof firmSettings.$inferSelect;
-export type InsertMemory = z.infer<typeof insertMemorySchema>;
-export type Memory = typeof memories.$inferSelect;

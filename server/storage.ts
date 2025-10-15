@@ -11,8 +11,6 @@ import {
   type InsertCustomerDetail,
   type FirmSettings,
   type InsertFirmSettings,
-  type Memory,
-  type InsertMemory,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -51,11 +49,6 @@ export interface IStorage {
 
   // Customer notes operations
   updateCustomerNotes(customerId: string, notes: string): Promise<Customer | undefined>;
-
-  // Memory operations
-  getMemories(type?: 'firm' | 'customer', customerId?: string): Promise<Memory[]>;
-  createMemory(memory: InsertMemory): Promise<Memory>;
-  deleteMemory(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -65,7 +58,6 @@ export class MemStorage implements IStorage {
   private chatMessages: Map<string, ChatMessage>;
   private customerDetails: Map<string, CustomerDetail>;
   private firmSettings: FirmSettings | undefined;
-  private memories: Map<string, Memory>;
 
   constructor() {
     this.customers = new Map();
@@ -74,7 +66,6 @@ export class MemStorage implements IStorage {
     this.chatMessages = new Map();
     this.customerDetails = new Map();
     this.firmSettings = undefined;
-    this.memories = new Map();
   }
 
   async getCustomers(): Promise<Customer[]> {
@@ -316,73 +307,6 @@ export class MemStorage implements IStorage {
     const updated = { ...customer, notes };
     this.customers.set(customerId, updated);
     return updated;
-  }
-
-  async getMemories(type?: 'firm' | 'customer', customerId?: string | null): Promise<Memory[]> {
-    let memories = Array.from(this.memories.values());
-    
-    console.log("getMemories called with:", { type, customerId });
-    console.log("All memories in storage:", memories.map(m => ({ 
-      id: m.id, 
-      type: m.type, 
-      customerId: m.customerId,
-      content: m.content.substring(0, 30) + "..."
-    })));
-    
-    if (type) {
-      memories = memories.filter(m => m.type === type);
-      console.log(`After type filter (${type}):`, memories.length, "memories");
-    }
-    
-    // For firm memories, we need to filter where customerId is null
-    // For customer memories, we need to filter where customerId matches
-    if (type === 'firm') {
-      memories = memories.filter(m => m.customerId === null);
-      console.log("After firm filter (customerId === null):", memories.length, "memories");
-    } else if (type === 'customer' && customerId) {
-      memories = memories.filter(m => m.customerId === customerId);
-      console.log(`After customer filter (customerId === ${customerId}):`, memories.length, "memories");
-    } else if (customerId !== undefined) {
-      // If no type specified but customerId provided, filter by customerId
-      memories = memories.filter(m => m.customerId === customerId);
-      console.log(`After customerId filter:`, memories.length, "memories");
-    }
-    
-    return memories.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-  }
-
-  async createMemory(insertMemory: InsertMemory): Promise<Memory> {
-    const id = randomUUID();
-    const memory: Memory = {
-      ...insertMemory,
-      id,
-      customerId: insertMemory.customerId || null,
-      intakeId: insertMemory.intakeId || null,
-      createdAt: new Date(),
-    };
-    
-    console.log("Creating memory:", { 
-      id, 
-      type: memory.type, 
-      customerId: memory.customerId,
-      content: memory.content.substring(0, 50) + "..."
-    });
-    
-    this.memories.set(id, memory);
-    
-    console.log("Total memories in storage after creation:", this.memories.size);
-    
-    return memory;
-  }
-
-  async deleteMemory(id: string): Promise<boolean> {
-    const memory = this.memories.get(id);
-    if (!memory) return false;
-    
-    this.memories.delete(id);
-    return true;
   }
 }
 
