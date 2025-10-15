@@ -270,9 +270,21 @@ export function DocumentList({ documents, intakeStatus, intakeId }: DocumentList
             </Badge>
           )}
         </div>
-        <p className="text-sm break-words" data-testid={`text-document-name-${doc.id}`}>
-          {doc.name}
-        </p>
+        {doc.status === "completed" ? (
+          <a
+            href={`/api/documents/${doc.id}/view`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm break-words text-primary hover:underline cursor-pointer"
+            data-testid={`link-document-view-${doc.id}`}
+          >
+            {doc.name}
+          </a>
+        ) : (
+          <p className="text-sm break-words" data-testid={`text-document-name-${doc.id}`}>
+            {doc.name}
+          </p>
+        )}
       </div>
       
       {doc.provenance ? (

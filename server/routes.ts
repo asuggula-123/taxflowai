@@ -311,6 +311,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
           openaiFileId = extraction.fileId;
           const cleanName = generateDocumentName(metadata);
           
+          // Check for duplicates before processing
+          const allExistingDocs = await storage.getDocumentsByIntake(req.params.intakeId);
+          
+          // Check for exact duplicate by file hash
+          const hashDuplicate = allExistingDocs.find(d => d.fileHash === fileHash && d.status === "completed");
+          
+          // Check for metadata duplicate (same documentType + entity + year)
+          const metadataDuplicate = allExistingDocs.find(d => 
+            d.status === "completed" &&
+            d.documentType === metadata.documentType &&
+            d.year === metadata.year &&
+            d.entity === metadata.entity
+          );
+          
+          const duplicate = hashDuplicate || metadataDuplicate;
+          
+          if (duplicate) {
+            // For now, replace the duplicate (later we'll add UI for user choice)
+            // Delete the old OpenAI file if it exists
+            if (duplicate.openaiFileId) {
+              try {
+                await openai.files.delete(duplicate.openaiFileId);
+              } catch (error) {
+                console.error("Failed to delete old OpenAI file:", error);
+              }
+            }
+            
+            // Update the existing document with new file
+            const document = await storage.updateDocument(duplicate.id, {
+              name: cleanName,
+              filePath: file.path,
+              openaiFileId: openaiFileId,
+              fileHash: fileHash,
+              status: "completed",
+            });
+            
+            if (document) {
+              uploadedDocs.push(document);
+            }
+            
+            // Create AI message about replacement
+            await storage.createChatMessage({
+              intakeId: req.params.intakeId,
+              sender: "ai",
+              content: `📝 Replaced duplicate document: ${cleanName}`,
+            });
+            
+            // Skip the rest of processing since we just replaced a duplicate
+            continue;
+          }
+          
           // Emit matching progress
           progressService.sendProgress({
             customerId,
@@ -606,13 +657,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // View/download document
+  app.get("/api/documents/:id/view", async (req, res) => {
+    try {
+      const document = await storage.getDocument(req.params.id);
+      
+      if (!document) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+
+      if (!document.openaiFileId) {
+        return res.status(404).json({ error: "Document file not available" });
+      }
+
+      // Retrieve file content from OpenAI
+      const fileContent = await openai.files.content(document.openaiFileId);
+      const buffer = await fileContent.arrayBuffer();
+
+      // Ensure filename has .pdf extension
+      const filename = document.name.toLowerCase().endsWith('.pdf') 
+        ? document.name 
+        : `${document.name}.pdf`;
+
+      // Set appropriate headers for PDF viewing
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      res.send(Buffer.from(buffer));
+    } catch (error) {
+      console.error("View document error:", error);
+      res.status(500).json({ error: "Failed to retrieve document" });
+    }
+  });
+
   // Delete document
   app.delete("/api/documents/:id", async (req, res) => {
     try {
+      // Get document first to access openaiFileId
+      const document = await storage.getDocument(req.params.id);
+      
+      if (!document) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+
+      // Delete from storage first
       const deleted = await storage.deleteDocument(req.params.id);
       
       if (!deleted) {
-        return res.status(404).json({ error: "Document not found" });
+        return res.status(404).json({ error: "Failed to delete document" });
+      }
+
+      // Clean up OpenAI file if it exists (after successful storage deletion)
+      if (document.openaiFileId) {
+        try {
+          await openai.files.delete(document.openaiFileId);
+        } catch (error) {
+          console.error("Failed to delete OpenAI file:", error);
+          // Document already deleted from storage, so still return success
+        }
       }
 
       res.status(204).send();

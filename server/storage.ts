@@ -30,6 +30,7 @@ export interface IStorage {
 
   // Document operations
   getDocumentsByIntake(intakeId: string): Promise<Document[]>;
+  getDocument(id: string): Promise<Document | undefined>;
   createDocument(document: InsertDocument): Promise<Document>;
   updateDocument(id: string, updates: Partial<Omit<Document, 'id' | 'intakeId' | 'createdAt'>>): Promise<Document | undefined>;
   updateDocumentStatus(id: string, status: string, filePath?: string, name?: string, openaiFileId?: string | null): Promise<Document | undefined>;
@@ -171,6 +172,10 @@ export class MemStorage implements IStorage {
     return Array.from(this.documents.values())
       .filter((d) => d.intakeId === intakeId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
+  async getDocument(id: string): Promise<Document | undefined> {
+    return this.documents.get(id);
   }
 
   async createDocument(insertDocument: InsertDocument): Promise<Document> {
