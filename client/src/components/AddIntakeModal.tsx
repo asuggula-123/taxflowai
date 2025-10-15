@@ -47,10 +47,11 @@ export function AddIntakeModal({ isOpen, onClose, customerId, customerName }: Ad
 
   const createIntakeMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest("POST", `/api/customers/${customerId}/intakes`, {
+      const response = await apiRequest("POST", `/api/customers/${customerId}/intakes`, {
         year,
         notes: notes.trim() || null,
       });
+      return await response.json();
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "intakes"] });
