@@ -52,7 +52,7 @@ export function AddIntakeModal({ isOpen, onClose, customerId, customerName }: Ad
         notes: notes.trim() || null,
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "intakes"] });
       toast({
         title: "Intake created",
@@ -61,8 +61,8 @@ export function AddIntakeModal({ isOpen, onClose, customerId, customerName }: Ad
       onClose();
       setYear("");
       setNotes("");
-      // Navigate to the new intake page
-      setLocation(`/customers/${customerId}/intakes/${year}`);
+      // Navigate to the new intake page using the UUID
+      setLocation(`/customers/${customerId}/intakes/${data.id}`);
     },
     onError: (error: Error) => {
       toast({

@@ -204,7 +204,7 @@ export default function CustomerSummary() {
                     <Card
                       key={intake.id}
                       className="cursor-pointer hover-elevate active-elevate-2"
-                      onClick={() => setLocation(`/customers/${customerId}/intakes/${intake.year}`)}
+                      onClick={() => setLocation(`/customers/${customerId}/intakes/${intake.id}`)}
                       data-testid={`card-intake-${intake.year}`}
                     >
                       <CardHeader>

@@ -17,31 +17,26 @@ import type { ChatMessage } from "@/components/ChatInterface";
 import type { TaxYearIntake } from "@shared/schema";
 
 export default function CustomerDetail() {
-  const [, params] = useRoute("/customers/:id/intakes/:year");
+  const [, params] = useRoute("/customers/:id/intakes/:intakeId");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const customerId = params?.id || "";
-  const year = params?.year || "";
+  const intakeId = params?.intakeId || "";
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Track currently streaming message for immediate visual updates
   const [streamingMessage, setStreamingMessage] = useState<{id: string; content: string} | null>(null);
   
-  // Fetch the intake to get intakeId
-  const { data: intake, isLoading: isLoadingIntake, isError: isIntakeError } = useQuery<TaxYearIntake | undefined>({
-    queryKey: ["/api/intakes", customerId, year],
+  // Fetch the intake for display
+  const { data: intake, isLoading: isLoadingIntake } = useQuery<TaxYearIntake | undefined>({
+    queryKey: ["/api/intakes", intakeId],
     queryFn: async () => {
-      const intakes = await fetch(`/api/customers/${customerId}/intakes`).then(r => r.json());
-      const foundIntake = intakes.find((i: TaxYearIntake) => String(i.year) === String(year));
-      if (!foundIntake) {
-        console.error(`No intake found for year ${year}. Available intakes:`, intakes.map((i: TaxYearIntake) => i.year));
-      }
-      return foundIntake;
+      const response = await fetch(`/api/intakes/${intakeId}`);
+      if (!response.ok) return undefined;
+      return response.json();
     },
-    enabled: !!customerId && !!year,
+    enabled: !!intakeId,
   });
-  
-  const intakeId = intake?.id || "";
   
   // WebSocket for progress tracking - use customerId from intake
   const { currentStep, message: progressMessage, progress: progressValue } = useProgressWebSocket(intake?.customerId || "");
@@ -277,7 +272,7 @@ export default function CustomerDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "messages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "details"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/intakes", customerId, year] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId] });
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       toast({
         title: "Upload complete",
@@ -316,12 +311,12 @@ export default function CustomerDetail() {
     );
   }
 
-  // Show error if intake not found
-  if (isIntakeError || !intake) {
+  // Show error if intake not found (only after loading completes)
+  if (!intake && !isLoadingIntake && intakeId) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
-          <p className="text-muted-foreground">Intake not found for tax year {year}</p>
+          <p className="text-muted-foreground">Intake not found</p>
           <Button onClick={() => setLocation(`/customers/${customerId}`)} data-testid="button-back-to-summary">
             Back to Customer Summary
           </Button>
@@ -357,7 +352,7 @@ export default function CustomerDetail() {
           <div className="space-y-4">
             <DocumentList 
               documents={documents} 
-              intakeStatus={intake.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
+              intakeStatus={intake?.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
               intakeId={intakeId}
             />
           </div>
@@ -373,12 +368,12 @@ export default function CustomerDetail() {
             onFileUpload={handleFileUpload}
             isUploading={uploadFilesMutation.isPending}
             isAiThinking={sendMessageMutation.isPending && !streamingMessage}
-            customerStatus={intake.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
+            customerStatus={intake?.status as "Awaiting Tax Return" | "Incomplete" | "Ready"}
             progressStep={currentStep}
             progressMessage={progressMessage}
             progressValue={progressValue}
             customerId={customerId}
-            intakeYear={intake.year}
+            intakeYear={intake?.year || ""}
           />
           <div ref={messagesEndRef} />
         </div>

@@ -27,10 +27,12 @@ async function calculateFileHash(filePath: string): Promise<string> {
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: async (req, file, cb) => {
-      const uploadDir = path.join(process.cwd(), "uploads");
-      await mkdir(uploadDir, { recursive: true });
-      cb(null, uploadDir);
+    destination: (req, file, cb) => {
+      // Use a temp uploads directory - files will be moved after processing
+      const uploadDir = path.join(process.cwd(), "uploads", "temp");
+      mkdir(uploadDir, { recursive: true })
+        .then(() => cb(null, uploadDir))
+        .catch(err => cb(err, ""));
     },
     filename: (req, file, cb) => {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -230,6 +232,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const customer = await storage.getCustomer(customerId);
       if (!customer) {
         return res.status(404).json({ error: "Customer not found" });
+      }
+
+      // Create permanent storage directory for this intake
+      const permanentDir = path.join(process.cwd(), "uploads", customerId, intakeId);
+      await mkdir(permanentDir, { recursive: true });
+
+      // Move files from temp to permanent location and update paths
+      const fs = await import("fs/promises");
+      for (const file of files) {
+        const newPath = path.join(permanentDir, path.basename(file.path));
+        await fs.rename(file.path, newPath);
+        file.path = newPath; // Update path for subsequent processing
       }
 
       // If intake is awaiting tax return, validate the first upload BEFORE emitting progress
@@ -666,23 +680,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Document not found" });
       }
 
-      if (!document.openaiFileId) {
+      if (!document.filePath) {
         return res.status(404).json({ error: "Document file not available" });
       }
-
-      // Retrieve file content from OpenAI
-      const fileContent = await openai.files.content(document.openaiFileId);
-      const buffer = await fileContent.arrayBuffer();
 
       // Ensure filename has .pdf extension
       const filename = document.name.toLowerCase().endsWith('.pdf') 
         ? document.name 
         : `${document.name}.pdf`;
 
-      // Set appropriate headers for PDF viewing
+      // Serve from local storage
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-      res.send(Buffer.from(buffer));
+      res.sendFile(path.resolve(document.filePath));
     } catch (error) {
       console.error("View document error:", error);
       res.status(500).json({ error: "Failed to retrieve document" });
@@ -692,7 +702,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Delete document
   app.delete("/api/documents/:id", async (req, res) => {
     try {
-      // Get document first to access openaiFileId
+      // Get document first to access file paths
       const document = await storage.getDocument(req.params.id);
       
       if (!document) {
@@ -704,6 +714,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!deleted) {
         return res.status(404).json({ error: "Failed to delete document" });
+      }
+
+      // Clean up local file if it exists
+      if (document.filePath) {
+        const fs = await import("fs/promises");
+        try {
+          await fs.unlink(document.filePath);
+        } catch (error) {
+          console.error("Failed to delete local file:", error);
+          // Document already deleted from storage, continue
+        }
       }
 
       // Clean up OpenAI file if it exists (after successful storage deletion)
