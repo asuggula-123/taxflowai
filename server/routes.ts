@@ -158,6 +158,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug endpoint to see all memories  
+  app.get("/api/memories/debug", async (req, res) => {
+    try {
+      const allMemories = await storage.getMemories();
+      console.log("\n=== DEBUG: ALL MEMORIES IN STORAGE ===");
+      console.log(`Total memories: ${allMemories.length}`);
+      allMemories.forEach(m => {
+        console.log(`- ID: ${m.id}`);
+        console.log(`  Type: ${m.type}`);
+        console.log(`  CustomerId: ${m.customerId}`);
+        console.log(`  Content: ${m.content}`);
+        console.log(`  Created: ${m.createdAt}`);
+      });
+      res.json({
+        count: allMemories.length,
+        memories: allMemories
+      });
+    } catch (error) {
+      console.error("Debug endpoint error:", error);
+      res.status(500).json({ error: "Failed to get debug info" });
+    }
+  });
+
   // Memory synthesis endpoint
   app.post("/api/memories/synthesize", async (req, res) => {
     try {
