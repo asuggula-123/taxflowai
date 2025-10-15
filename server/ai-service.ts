@@ -970,8 +970,13 @@ export async function detectMemories(
   aiResponse: string,
   intakeId: string
 ): Promise<DetectedMemory[]> {
+  console.log("\n=== DETECT MEMORIES CALLED ===");
+  console.log("Accountant message:", accountantMessage);
+  console.log("AI response (first 100 chars):", aiResponse.substring(0, 100) + "...");
+  
   const intake = await storage.getIntake(intakeId);
   if (!intake) {
+    console.log("No intake found for intakeId:", intakeId);
     return [];
   }
   
@@ -1074,7 +1079,12 @@ Examples that should create NO MEMORY:
     const content = response.choices[0].message.content || "{}";
     const parsed = JSON.parse(content);
     
-    return Array.isArray(parsed.detectedMemories) ? parsed.detectedMemories : [];
+    console.log("Memory detection response:", JSON.stringify(parsed, null, 2));
+    
+    const detectedMemories = Array.isArray(parsed.detectedMemories) ? parsed.detectedMemories : [];
+    console.log(`Found ${detectedMemories.length} memories to detect`);
+    
+    return detectedMemories;
   } catch (error) {
     console.error("Error detecting memories:", error);
     return [];
