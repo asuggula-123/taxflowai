@@ -5,9 +5,12 @@ import multer from "multer";
 import { insertCustomerSchema, insertTaxYearIntakeSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
-import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn, synthesizeMemoriesIntoNotes } from "./ai-service";
+import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn, synthesizeMemoriesIntoNotes, detectMemories } from "./ai-service";
 import { progressService } from "./progress-service";
 import { randomUUID } from "crypto";
+import OpenAI from "openai";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -658,8 +661,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create accountant message
       const message = await storage.createChatMessage(validatedData);
 
-      // Generate AI response (returns structured data with message and requested documents)
-      const aiResponse = await generateChatResponse(validatedData.content, req.params.intakeId);
+      // Run memory detection and chat response generation in parallel
+      const [detectedMemories, aiResponse] = await Promise.all([
+        detectMemories(validatedData.content, req.params.intakeId),
+        generateChatResponse(validatedData.content, req.params.intakeId)
+      ]);
+
       const aiMessage = await storage.createChatMessage({
         intakeId: req.params.intakeId,
         sender: "ai",
@@ -692,11 +699,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json({ 
         message, 
         aiMessage,
-        detectedMemories: aiResponse.detectedMemories 
+        detectedMemories 
       });
     } catch (error) {
       console.error("Message error:", error);
       res.status(400).json({ error: "Invalid message data" });
+    }
+  });
+
+  // Streaming chat endpoint with SSE
+  app.post("/api/intakes/:intakeId/messages/stream", async (req, res) => {
+    try {
+      // Check intake status before allowing chat
+      const intake = await storage.getIntake(req.params.intakeId);
+      if (!intake) {
+        return res.status(404).json({ error: "Intake not found" });
+      }
+
+      // Enforce workflow gate
+      if (intake.status === "Awaiting Tax Return") {
+        const expectedPriorYear = parseInt(intake.year) - 1;
+        return res.status(403).json({ 
+          error: `Chat is disabled. Please upload and validate the customer's ${expectedPriorYear} tax return first.` 
+        });
+      }
+
+      const { tempAccountantId, ...messageData } = req.body;
+      const validatedData = insertChatMessageSchema.parse({
+        ...messageData,
+        intakeId: req.params.intakeId,
+      });
+      
+      // Set SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      // Create accountant message
+      const message = await storage.createChatMessage(validatedData);
+
+      // Emit accountant message with tempAccountantId for frontend correlation
+      res.write(`event: accountant_message\n`);
+      res.write(`data: ${JSON.stringify({ ...message, tempAccountantId })}\n\n`);
+
+      // Start parallel execution: memory detection and streaming response
+      let detectedMemories: any[] = [];
+      const memoryPromise = detectMemories(validatedData.content, req.params.intakeId).then(memories => {
+        detectedMemories = memories;
+        // Emit memories immediately when detected (during streaming)
+        if (memories.length > 0) {
+          res.write(`event: memories\n`);
+          res.write(`data: ${JSON.stringify({ detectedMemories: memories })}\n\n`);
+        }
+        return memories;
+      });
+      
+      // Start streaming chat response
+      const customer = await storage.getCustomer(intake.customerId);
+      const documents = await storage.getDocumentsByIntake(req.params.intakeId);
+      const details = await storage.getCustomerDetailsByIntake(req.params.intakeId);
+      const messages = await storage.getChatMessagesByIntake(req.params.intakeId);
+      const firmSettings = await storage.getFirmSettings();
+      const customerNotes = customer?.notes || "";
+
+      const context = `
+Customer: ${customer?.name}
+Tax Year: ${intake.year}
+Documents: ${documents.map((d) => `${d.name} (${d.status})`).join(", ")}
+Customer Details: ${details.filter((d) => d.value).map((d) => `${d.label}: ${d.value}`).join(", ")}
+Recent conversation: ${messages.slice(-5).map((m) => `${m.sender}: ${m.content}`).join("\n")}
+
+Firm-level standing instructions:
+${firmSettings?.notes || "None"}
+
+Customer-specific notes:
+${customerNotes || "None"}
+`;
+
+      const prompt = `You are a helpful tax preparation assistant. We are preparing ${intake.year} tax returns. The accountant said: "${validatedData.content}"
+
+Current context:
+${context}
+
+Instructions:
+1. Respond helpfully to the accountant
+2. If they mention new income sources or tax obligations not in the document list, note them for document requests`;
+
+      const stream = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a professional tax preparation assistant." },
+          { role: "user", content: prompt },
+        ],
+        stream: true,
+      });
+
+      let fullMessage = "";
+      let requestedDocuments: any[] = [];
+
+      // Stream response chunks
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          fullMessage += content;
+          res.write(`event: chunk\n`);
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      // Save AI message
+      const aiMessage = await storage.createChatMessage({
+        intakeId: req.params.intakeId,
+        sender: "ai",
+        content: fullMessage,
+      });
+
+      // Wait for memory detection to complete (memories already emitted if found)
+      await memoryPromise;
+
+      // Emit complete event with AI message and memories
+      res.write(`event: complete\n`);
+      res.write(`data: ${JSON.stringify({ aiMessage, detectedMemories, requestedDocuments })}\n\n`);
+
+      res.end();
+    } catch (error) {
+      console.error("Streaming message error:", error);
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ error: "Failed to process message" })}\n\n`);
+      res.end();
     }
   });
 

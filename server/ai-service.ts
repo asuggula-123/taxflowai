@@ -913,7 +913,6 @@ export interface DetectedMemory {
 interface ChatResponseResult {
   message: string;
   requestedDocuments: StructuredDocumentRequest[];
-  detectedMemories: DetectedMemory[];
 }
 
 export async function synthesizeMemoriesIntoNotes(
@@ -961,6 +960,103 @@ Return ONLY the synthesized notes as plain text, formatted for easy reading.`;
   }
 }
 
+/**
+ * Fast, focused memory detection using GPT-4o-mini
+ * Runs in parallel with main chat response for ChatGPT-like UX
+ */
+export async function detectMemories(
+  userMessage: string,
+  intakeId: string
+): Promise<DetectedMemory[]> {
+  const intake = await storage.getIntake(intakeId);
+  if (!intake) {
+    return [];
+  }
+  
+  const customer = await storage.getCustomer(intake.customerId);
+  const messages = await storage.getChatMessagesByIntake(intakeId);
+  const firmSettings = await storage.getFirmSettings();
+  const customerNotes = customer?.notes || "";
+
+  const recentConversation = messages.slice(-5).map((m) => `${m.sender}: ${m.content}`).join("\n");
+
+  const prompt = `Analyze this tax preparation conversation for memorable information.
+
+Current conversation:
+Accountant: "${userMessage}"
+
+Context:
+- Customer: ${customer?.name}
+- Tax Year: ${intake.year}
+- Recent conversation: ${recentConversation}
+- Firm notes: ${firmSettings?.notes || "None"}
+- Customer notes: ${customerNotes || "None"}
+
+Your ONLY task: Identify if this message contains information worth remembering for future tax preparation.
+
+Detect as FIRM memory if:
+- Contains phrases like "we always/never ask for X"
+- States a firm-wide policy or process
+- Describes standard procedures for all customers
+
+Detect as CUSTOMER memory if:
+- States recurring patterns for this specific taxpayer
+- Material facts about this customer's tax situation
+- Customer-specific preferences or requirements
+
+If nothing memorable, return empty array.`;
+
+  const memorySchema = {
+    type: "object" as const,
+    properties: {
+      detectedMemories: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const, enum: ["firm", "customer"] },
+            content: { type: "string" as const },
+            reason: { type: "string" as const }
+          },
+          required: ["type", "content", "reason"],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ["detectedMemories"],
+    additionalProperties: false
+  };
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are a memory detection specialist. Identify valuable information worth remembering for tax preparation.",
+        },
+        { role: "user", content: prompt },
+      ],
+      response_format: { 
+        type: "json_schema",
+        json_schema: {
+          name: "memory_detection",
+          strict: true,
+          schema: memorySchema
+        }
+      },
+    });
+
+    const content = response.choices[0].message.content || "{}";
+    const parsed = JSON.parse(content);
+    
+    return Array.isArray(parsed.detectedMemories) ? parsed.detectedMemories : [];
+  } catch (error) {
+    console.error("Error detecting memories:", error);
+    return [];
+  }
+}
+
 export async function generateChatResponse(
   userMessage: string,
   intakeId: string
@@ -1001,17 +1097,9 @@ Instructions:
 1. Respond helpfully to the accountant in the "message" field
 
 2. If they mention new income sources or tax obligations not in the document list, create specific document requests for ${intake.year} in the "requestedDocuments" array
-
-3. Evaluate if the message contains information valuable for future tax preparation:
-   - If YES, populate "detectedMemories" array with:
-     * Type "firm" for policies/processes that apply to all customers
-     * Type "customer" for recurring patterns or material facts about this specific taxpayer
-   - If NO, leave "detectedMemories" as empty array
-
-IMPORTANT: Always evaluate for memories. If the accountant states a firm policy (e.g., "we always ask for X") or customer-specific fact, you MUST include it in detectedMemories - don't just acknowledge it in your message.
 `;
 
-  // Define strict JSON schema for structured outputs
+  // Define strict JSON schema for structured outputs (detectedMemories handled separately)
   const responseSchema = {
     type: "object" as const,
     properties: {
@@ -1038,28 +1126,15 @@ IMPORTANT: Always evaluate for memories. If the accountant states a firm policy 
           required: ["name", "documentType", "year", "entity"],
           additionalProperties: false
         }
-      },
-      detectedMemories: {
-        type: "array" as const,
-        items: {
-          type: "object" as const,
-          properties: {
-            type: { type: "string" as const, enum: ["firm", "customer"] },
-            content: { type: "string" as const },
-            reason: { type: "string" as const }
-          },
-          required: ["type", "content", "reason"],
-          additionalProperties: false
-        }
       }
     },
-    required: ["message", "requestedDocuments", "detectedMemories"],
+    required: ["message", "requestedDocuments"],
     additionalProperties: false
   };
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -1095,32 +1170,15 @@ IMPORTANT: Always evaluate for memories. If the accountant states a firm policy 
       }
     }
     
-    // Validate and parse detected memories
-    const detectedMemories: DetectedMemory[] = [];
-    if (Array.isArray(parsed.detectedMemories)) {
-      for (const memory of parsed.detectedMemories) {
-        if (memory.type && memory.content && memory.reason && 
-            (memory.type === 'firm' || memory.type === 'customer')) {
-          detectedMemories.push({
-            type: memory.type,
-            content: memory.content,
-            reason: memory.reason
-          });
-        }
-      }
-    }
-    
     return {
       message: parsed.message || "I'm here to help!",
       requestedDocuments,
-      detectedMemories,
     };
   } catch (error) {
     console.error("Error generating chat response:", error);
     return {
       message: "I understand. Please continue with the document upload process.",
       requestedDocuments: [],
-      detectedMemories: [],
     };
   }
 }

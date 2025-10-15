@@ -94,20 +94,158 @@ export default function CustomerDetail() {
   }));
 
   const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
-      return await apiRequest("POST", `/api/intakes/${intakeId}/messages`, {
-        sender: "accountant",
-        content,
+    mutationFn: async ({ content, tempAccountantId }: { content: string; tempAccountantId: string }) => {
+      // Use streaming endpoint, pass tempAccountantId so backend can return it for correlation
+      const response = await fetch(`/api/intakes/${intakeId}/messages/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sender: "accountant", content, tempAccountantId }),
       });
+
+      if (!response.ok || !response.body) {
+        throw new Error("Failed to send message");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+      let accountantMessage: any = null;
+      let aiMessageId: string | null = null;
+      let streamingContent = "";
+      let finalResult: any = { aiMessage: null, detectedMemories: [] };
+      let pendingMemories: any[] = []; // Store memories that arrive before first chunk
+
+      // Read stream
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(7).trim();
+            continue;
+          }
+          
+          if (line.startsWith("data:")) {
+            const data = JSON.parse(line.slice(6));
+
+            if (currentEvent === "accountant_message") {
+              // Real accountant message saved - replace temp optimistic message immediately
+              accountantMessage = data;
+              
+              // Replace specific temp accountant message with real persisted one
+              // tempAccountantId is returned from backend for correlation
+              if (data.tempAccountantId) {
+                queryClient.setQueryData(
+                  ["/api/intakes", intakeId, "messages"],
+                  (old: any[] = []) => 
+                    old.filter(msg => msg.id !== data.tempAccountantId)
+                      .concat(accountantMessage)
+                );
+              }
+            }
+
+            if (currentEvent === "memories") {
+              // Memories detected - show immediately (before streaming completes)
+              const memories = data.detectedMemories || [];
+              if (memories.length > 0) {
+                if (aiMessageId) {
+                  // AI message exists, attach memories immediately
+                  setMessageMemories(prev => ({
+                    ...prev,
+                    [aiMessageId as string]: memories
+                  }));
+                } else {
+                  // No AI message yet, store for later
+                  pendingMemories = memories;
+                }
+              }
+            }
+
+            if (currentEvent === "chunk" && data.content) {
+              // Streaming chunk
+              streamingContent += data.content;
+              
+              // Update AI message optimistically with streaming content
+              if (aiMessageId) {
+                queryClient.setQueryData(
+                  ["/api/intakes", intakeId, "messages"],
+                  (old: any[] = []) => 
+                    old.map(msg => 
+                      msg.id === aiMessageId 
+                        ? { ...msg, content: streamingContent }
+                        : msg
+                    )
+                );
+              } else {
+                // Create temp AI message
+                aiMessageId = `ai-temp-${Date.now()}`;
+                queryClient.setQueryData(
+                  ["/api/intakes", intakeId, "messages"],
+                  (old: any[] = []) => [
+                    ...old,
+                    {
+                      id: aiMessageId,
+                      intakeId,
+                      sender: "ai",
+                      content: streamingContent,
+                      createdAt: new Date().toISOString(),
+                    },
+                  ]
+                );
+
+                // Apply pending memories if any
+                if (pendingMemories.length > 0) {
+                  setMessageMemories(prev => ({
+                    ...prev,
+                    [aiMessageId as string]: pendingMemories
+                  }));
+                  pendingMemories = [];
+                }
+              }
+            }
+
+            if (currentEvent === "complete") {
+              // Stream complete
+              const finalMessage = data.aiMessage;
+              const detectedMemories = data.detectedMemories || [];
+              finalResult = { aiMessage: finalMessage, detectedMemories };
+
+              // Show memories immediately
+              if (detectedMemories.length > 0 && finalMessage?.id) {
+                setMessageMemories(prev => ({
+                  ...prev,
+                  [finalMessage.id]: detectedMemories
+                }));
+              }
+
+              // Replace temp AI message with real persisted one
+              // (temp accountant already replaced when accountant_message event arrived)
+              queryClient.setQueryData(
+                ["/api/intakes", intakeId, "messages"],
+                (old: any[] = []) => 
+                  old.filter(msg => msg.id !== aiMessageId)
+                    .concat(finalMessage)
+              );
+            }
+          }
+        }
+      }
+
+      return finalResult;
     },
-    onMutate: async (content: string) => {
-      // Cancel any outgoing refetches to avoid optimistic update being overwritten
+    onMutate: async ({ content, tempAccountantId }: { content: string; tempAccountantId: string }) => {
+      // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: ["/api/intakes", intakeId, "messages"] });
 
-      // Optimistically update to show user's message immediately
-      const tempId = `temp-${Date.now()}`;
+      // Optimistically add user's message using provided tempAccountantId
       const optimisticMessage = {
-        id: tempId,
+        id: tempAccountantId,
         intakeId,
         sender: "accountant" as const,
         content,
@@ -119,11 +257,10 @@ export default function CustomerDetail() {
         (old: any[] = []) => [...old, optimisticMessage]
       );
 
-      // Return context with temp ID for potential rollback
-      return { tempId };
+      return { tempAccountantId };
     },
     onSuccess: (data: any) => {
-      // Capture detected memories from AI response
+      // Capture detected memories
       if (data?.detectedMemories && data?.aiMessage?.id) {
         setMessageMemories(prev => ({
           ...prev,
@@ -131,22 +268,20 @@ export default function CustomerDetail() {
         }));
       }
       
-      // Invalidate to fetch the real messages (including AI response)
-      queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "messages"] });
+      // Invalidate queries
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "details"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId] });
     },
     onError: (err, _variables, context) => {
-      // Remove only the specific failed message, preserving other messages
-      if (context?.tempId) {
+      // Remove failed optimistic accountant message
+      if (context?.tempAccountantId) {
         queryClient.setQueryData(
           ["/api/intakes", intakeId, "messages"],
-          (old: any[] = []) => old.filter((msg) => msg.id !== context.tempId)
+          (old: any[] = []) => old.filter((msg) => msg.id !== context.tempAccountantId)
         );
       }
       
-      // Show error to user
       toast({
         title: "Failed to send message",
         description: "Your message could not be sent. Please try again.",
@@ -215,7 +350,9 @@ export default function CustomerDetail() {
   }, [messages.length]);
 
   const handleSendMessage = (message: string) => {
-    sendMessageMutation.mutate(message);
+    // Generate tempAccountantId here so both onMutate and mutationFn can access it
+    const tempAccountantId = `temp-accountant-${Date.now()}-${Math.random()}`;
+    sendMessageMutation.mutate({ content: message, tempAccountantId });
   };
 
   const handleFileUpload = (files: FileList) => {
