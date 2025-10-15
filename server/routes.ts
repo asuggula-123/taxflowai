@@ -131,9 +131,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/memories", async (req, res) => {
     try {
+      console.log("POST /api/memories - Request body:", JSON.stringify(req.body, null, 2));
       const memory = await storage.createMemory(req.body);
+      console.log("Memory created successfully:", {
+        id: memory.id,
+        type: memory.type,
+        customerId: memory.customerId,
+        content: memory.content.substring(0, 50) + "..."
+      });
       res.status(201).json(memory);
     } catch (error) {
+      console.error("Error creating memory:", error);
       res.status(400).json({ error: "Invalid memory data" });
     }
   });
