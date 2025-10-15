@@ -7,10 +7,23 @@ import path from "path";
 import { mkdir } from "fs/promises";
 import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn, quickExtractDocumentMetadata, generateDocumentName } from "./ai-service";
 import { progressService } from "./progress-service";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
+import { createReadStream } from "fs";
 import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Helper function to calculate SHA-256 hash of a file
+async function calculateFileHash(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(filePath);
+    
+    stream.on('data', (data) => hash.update(data));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -281,6 +294,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let openaiFileId: string | null = null;
 
         try {
+          // Calculate file hash for duplicate detection
+          const fileHash = await calculateFileHash(file.path);
+
           // Phase 1: Quick metadata extraction with gpt-4o-mini (uploads file once)
           progressService.sendProgress({
             customerId,
@@ -355,17 +371,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let document;
           if (matchingRequested) {
             // Update existing requested document with clean AI-generated name, metadata, and OpenAI file ID
-            document = await storage.updateDocumentStatus(
-              matchingRequested.id, 
-              "completed", 
-              file.path,
-              cleanName,
-              openaiFileId
-            );
+            document = await storage.updateDocument(matchingRequested.id, {
+              status: "completed",
+              filePath: file.path,
+              name: cleanName,
+              openaiFileId: openaiFileId,
+              fileHash: fileHash,
+            });
             // Mark as matched to prevent reuse in this batch
             matchedDocIds.add(matchingRequested.id);
           } else {
-            // Create new document with clean AI-generated name, metadata, and OpenAI file ID
+            // Create new document with clean AI-generated name, metadata, OpenAI file ID, and file hash
             document = await storage.createDocument({
               intakeId: req.params.intakeId,
               name: cleanName,
@@ -375,6 +391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               status: "completed",
               filePath: file.path,
               openaiFileId: openaiFileId,
+              fileHash: fileHash,
             });
           }
           
