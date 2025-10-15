@@ -318,22 +318,34 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async getMemories(type?: 'firm' | 'customer', customerId?: string): Promise<Memory[]> {
+  async getMemories(type?: 'firm' | 'customer', customerId?: string | null): Promise<Memory[]> {
     let memories = Array.from(this.memories.values());
+    
+    console.log("getMemories called with:", { type, customerId });
+    console.log("All memories in storage:", memories.map(m => ({ 
+      id: m.id, 
+      type: m.type, 
+      customerId: m.customerId,
+      content: m.content.substring(0, 30) + "..."
+    })));
     
     if (type) {
       memories = memories.filter(m => m.type === type);
+      console.log(`After type filter (${type}):`, memories.length, "memories");
     }
     
     // For firm memories, we need to filter where customerId is null
     // For customer memories, we need to filter where customerId matches
     if (type === 'firm') {
       memories = memories.filter(m => m.customerId === null);
+      console.log("After firm filter (customerId === null):", memories.length, "memories");
     } else if (type === 'customer' && customerId) {
       memories = memories.filter(m => m.customerId === customerId);
-    } else if (customerId) {
+      console.log(`After customer filter (customerId === ${customerId}):`, memories.length, "memories");
+    } else if (customerId !== undefined) {
       // If no type specified but customerId provided, filter by customerId
       memories = memories.filter(m => m.customerId === customerId);
+      console.log(`After customerId filter:`, memories.length, "memories");
     }
     
     return memories.sort(
@@ -350,7 +362,18 @@ export class MemStorage implements IStorage {
       intakeId: insertMemory.intakeId || null,
       createdAt: new Date(),
     };
+    
+    console.log("Creating memory:", { 
+      id, 
+      type: memory.type, 
+      customerId: memory.customerId,
+      content: memory.content.substring(0, 50) + "..."
+    });
+    
     this.memories.set(id, memory);
+    
+    console.log("Total memories in storage after creation:", this.memories.size);
+    
     return memory;
   }
 
