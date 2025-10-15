@@ -963,9 +963,11 @@ Return ONLY the synthesized notes as plain text, formatted for easy reading.`;
 /**
  * Fast, focused memory detection using GPT-4o-mini
  * Runs in parallel with main chat response for ChatGPT-like UX
+ * Now context-aware: only detects memories directly relevant to the accountant's question
  */
 export async function detectMemories(
-  userMessage: string,
+  accountantMessage: string,
+  aiResponse: string,
   intakeId: string
 ): Promise<DetectedMemory[]> {
   const intake = await storage.getIntake(intakeId);
@@ -974,37 +976,44 @@ export async function detectMemories(
   }
   
   const customer = await storage.getCustomer(intake.customerId);
-  const messages = await storage.getChatMessagesByIntake(intakeId);
   const firmSettings = await storage.getFirmSettings();
   const customerNotes = customer?.notes || "";
 
-  const recentConversation = messages.slice(-5).map((m) => `${m.sender}: ${m.content}`).join("\n");
+  const prompt = `Analyze this tax preparation conversation for memorable information that is DIRECTLY RELEVANT to what the accountant asked about.
 
-  const prompt = `Analyze this tax preparation conversation for memorable information.
+What the accountant asked:
+"${accountantMessage}"
 
-Current conversation:
-Accountant: "${userMessage}"
+AI's response (which includes context):
+"${aiResponse}"
 
 Context:
 - Customer: ${customer?.name}
 - Tax Year: ${intake.year}
-- Recent conversation: ${recentConversation}
 - Firm notes: ${firmSettings?.notes || "None"}
 - Customer notes: ${customerNotes || "None"}
 
-Your ONLY task: Identify if this message contains information worth remembering for future tax preparation.
+Your task: Identify ONLY information that is DIRECTLY RELEVANT to the accountant's specific question.
+
+CRITICAL: Ignore incidental facts or background context mentioned in the response that don't directly address what the accountant asked about.
+
+Examples:
+- If accountant asks "Does he have foreign bank accounts?" → Capture: firm policy about foreign accounts
+- If accountant asks "Does he have foreign bank accounts?" → IGNORE: filing status, state balances (just background context)
+- If accountant asks "What's his filing status?" → Capture: MFJ status if it's a recurring pattern
+- If accountant asks "What's his filing status?" → IGNORE: unrelated income sources mentioned
 
 Detect as FIRM memory if:
-- Contains phrases like "we always/never ask for X"
-- States a firm-wide policy or process
-- Describes standard procedures for all customers
+- Contains phrases like "we always/never ask for X" ABOUT THE TOPIC the accountant asked
+- States a firm-wide policy DIRECTLY RELATED to the question
+- Describes standard procedures RELEVANT to what was asked
 
 Detect as CUSTOMER memory if:
-- States recurring patterns for this specific taxpayer
-- Material facts about this customer's tax situation
-- Customer-specific preferences or requirements
+- States recurring patterns ABOUT THE TOPIC the accountant asked
+- Material facts DIRECTLY ANSWERING the accountant's question
+- Customer-specific preferences RELEVANT to what was asked
 
-If nothing memorable, return empty array.`;
+If nothing directly relevant and memorable, return empty array.`;
 
   const memorySchema = {
     type: "object" as const,
