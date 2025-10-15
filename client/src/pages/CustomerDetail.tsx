@@ -210,7 +210,8 @@ export default function CustomerDetail() {
               // Stream complete
               const finalMessage = data.aiMessage;
               const detectedMemories = data.detectedMemories || [];
-              finalResult = { aiMessage: finalMessage, detectedMemories };
+              const requestedDocuments = data.requestedDocuments || [];
+              finalResult = { aiMessage: finalMessage, detectedMemories, requestedDocuments };
 
               // Clear streaming message state
               setStreamingMessage(null);
@@ -221,6 +222,20 @@ export default function CustomerDetail() {
                   ...prev,
                   [finalMessage.id]: detectedMemories
                 }));
+              }
+
+              // Auto-create requested documents
+              if (requestedDocuments.length > 0) {
+                console.log("AI requested documents:", requestedDocuments);
+                // Create documents via API
+                fetch(`/api/intakes/${intakeId}/documents/bulk-create`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ documents: requestedDocuments }),
+                }).then(() => {
+                  // Refresh documents list
+                  queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
+                }).catch(err => console.error("Failed to create documents:", err));
               }
 
               // Add real persisted message to cache
