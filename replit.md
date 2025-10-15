@@ -12,10 +12,10 @@ I prefer iterative development, with a focus on delivering core features first a
 The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI components for a modern and consistent look. The application features a multi-year intake system with customer summary and intake-specific views. Status badges provide clear visual cues for each tax year intake.
 
 ### Technical Implementations
-- **Frontend**: React, TypeScript, Wouter for routing, TanStack Query for server state management, SSE event handler with pendingMemories buffer.
-- **Backend**: Express with TypeScript, utilizing Multer for robust file uploads, Server-Sent Events for streaming responses.
-- **AI Integration**: Leverages OpenAI GPT-4o for streaming chat responses and GPT-4o-mini for parallel memory detection (~500ms). Uses OpenAI's Files API for content-based PDF analysis and `json_schema` structured outputs for guaranteed schema compliance.
-- **Data Model**: Core entities include Customers, Tax Year Intakes, Documents, Chat Messages, Customer Details, Firm Settings, and Memories. The system supports multi-year intakes, with documents and chat linked to specific tax year intakes.
+- **Frontend**: React, TypeScript, Wouter for UUID-based routing (/customers/:id/intakes/:intakeId), TanStack Query for server state management, SSE event handler with pendingMemories buffer.
+- **Backend**: Express with TypeScript, utilizing Multer for robust file uploads with local file storage (uploads/{customerId}/{intakeId}/), Server-Sent Events for streaming responses.
+- **AI Integration**: Leverages OpenAI GPT-4o for streaming chat responses and GPT-4o-mini for parallel memory detection (~500ms). Uses OpenAI's Files API for content-based PDF analysis (file_id stored for reference only, files served from local disk), `json_schema` structured outputs for guaranteed schema compliance.
+- **Data Model**: Core entities include Customers, Tax Year Intakes (UUID-based, supports multiple per year), Documents (with local filePath and openaiFileId), Chat Messages, Customer Details, Firm Settings, and Memories. The system supports multi-year intakes with UUID identifiers, enabling multiple intakes per year (e.g., personal + business).
 - **Streaming Architecture**: Server-Sent Events (SSE) enable real-time streaming with context-aware memory detection:
   - GPT-4o streams chat response chunks progressively via SSE events
   - Frontend uses local React state for immediate chunk-by-chunk visual updates (ChatGPT-like experience)
@@ -38,10 +38,11 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 ### System Design Choices
 - **In-memory storage (MemStorage)** for current MVP, with future plans for PostgreSQL.
 - Server-side enforcement of workflow gates.
-- Robust duplicate prevention for documents.
+- Robust duplicate prevention for documents (SHA-256 hash matching or metadata matching).
 - Optimized UI for immediate user feedback (optimistic chat, upload progress, AI thinking indicators).
 - Comprehensive error handling with clear messages.
 - Precise cache management for chat messages to avoid unintended removals.
+- **Local file persistence**: PDFs stored in uploads/{customerId}/{intakeId}/ directory structure (Multer temp → permanent move pattern), served via res.sendFile(), cleaned up with fs.unlink() on deletion.
 
 ## External Dependencies
 - **OpenAI API**: Utilized for AI-powered document analysis (GPT-5) and chat response generation.
