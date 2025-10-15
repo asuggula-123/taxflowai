@@ -289,10 +289,35 @@ export default function CustomerDetail() {
 
   const confirmMemoryMutation = useMutation({
     mutationFn: async ({ content, type }: { content: string; type: 'firm' | 'customer' }) => {
-      return await apiRequest("POST", "/api/memories", {
+      // Step 1: Create the memory entity (for audit trail)
+      await apiRequest("POST", "/api/memories", {
         customerId: type === 'customer' ? customerId : null,
         content,
       });
+
+      // Step 2: Synthesize all memories into clean notes
+      const synthesisResponse = await apiRequest("POST", "/api/memories/synthesize", {
+        type,
+        customerId: type === 'customer' ? customerId : null,
+      });
+
+      return synthesisResponse.json();
+    },
+    onSuccess: (data, variables) => {
+      // Invalidate the appropriate query to refresh UI
+      if (variables.type === 'firm') {
+        queryClient.invalidateQueries({ queryKey: ["/api/firm/settings"] });
+        toast({
+          title: "Firm policy saved",
+          description: "This policy has been added to your firm settings and will be used for all customers.",
+        });
+      } else if (variables.type === 'customer') {
+        queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "notes"] });
+        toast({
+          title: "Customer note saved",
+          description: "This information has been added to the customer's notes.",
+        });
+      }
     },
   });
 

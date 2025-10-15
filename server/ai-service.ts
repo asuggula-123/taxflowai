@@ -995,23 +995,30 @@ Context:
 
 Your task: Identify ONLY information that is DIRECTLY RELEVANT to the accountant's specific question.
 
-CRITICAL: Ignore incidental facts or background context mentioned in the response that don't directly address what the accountant asked about.
+CRITICAL RULES:
+1. Ignore incidental facts or background context mentioned in the response that don't directly address what the accountant asked about.
+2. When the accountant states a firm-wide policy (using "we/our/firm"), do NOT create a customer-specific memory when the AI applies that policy to the current customer.
+3. Only create customer-specific memories for facts UNIQUE to this customer, not AI's personalization of firm policies.
 
-Examples:
-- If accountant asks "Does he have foreign bank accounts?" → Capture: firm policy about foreign accounts
-- If accountant asks "Does he have foreign bank accounts?" → IGNORE: filing status, state balances (just background context)
-- If accountant asks "What's his filing status?" → Capture: MFJ status if it's a recurring pattern
-- If accountant asks "What's his filing status?" → IGNORE: unrelated income sources mentioned
+Examples of CORRECT memory detection:
+- Accountant: "we always ask for foreign bank accounts" → FIRM memory: "we always ask for foreign bank account statements as well"
+- Accountant: "we always ask for foreign bank accounts" + AI: "James should provide foreign bank statements" → ONLY FIRM memory (AI is just applying firm policy)
+- Accountant: "Does he have RSUs?" + AI: "Yes, customer has RSUs at Google every year" → CUSTOMER memory: recurring RSU income from Google
+
+Examples of INCORRECT memory detection (DO NOT DO THIS):
+- Accountant: "we always ask for X" + AI: "Customer should provide X" → DO NOT create customer memory (it's just AI applying firm policy)
+- Accountant asks about foreign accounts + AI mentions filing status → DO NOT capture filing status (not relevant to question)
 
 Detect as FIRM memory if:
-- Contains phrases like "we always/never ask for X" ABOUT THE TOPIC the accountant asked
-- States a firm-wide policy DIRECTLY RELATED to the question
-- Describes standard procedures RELEVANT to what was asked
+- Accountant uses "we/our/firm" language stating a policy/procedure ABOUT THE TOPIC they asked about
+- States a firm-wide standard DIRECTLY RELATED to the question
 
-Detect as CUSTOMER memory if:
-- States recurring patterns ABOUT THE TOPIC the accountant asked
-- Material facts DIRECTLY ANSWERING the accountant's question
+Detect as CUSTOMER memory ONLY if:
+- Reveals a recurring pattern UNIQUE to this customer (not AI applying firm policy)
+- Material facts DIRECTLY ANSWERING the accountant's question that are customer-specific
 - Customer-specific preferences RELEVANT to what was asked
+
+If the accountant states a firm policy and the AI merely applies it to the current customer, return ONLY the firm memory, NOT a customer-specific one.
 
 If nothing directly relevant and memorable, return empty array.`;
 
