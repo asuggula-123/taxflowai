@@ -98,6 +98,117 @@ interface TaxReturnValidation {
   errorMessage?: string;
 }
 
+export interface QuickDocumentMetadata {
+  documentType: string;
+  entity: string | null;
+  year: string;
+}
+
+// Helper function to generate clean document names from metadata
+export function generateDocumentName(metadata: QuickDocumentMetadata): string {
+  // Clean up entity name for filename (remove special chars, spaces)
+  const cleanEntity = metadata.entity
+    ? metadata.entity
+        .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special characters
+        .replace(/\s+/g, '') // Remove spaces
+        .trim()
+    : null;
+
+  // Clean up document type for filename
+  const cleanType = metadata.documentType
+    .replace(/[^a-zA-Z0-9\s-]/g, '') // Keep letters, numbers, spaces, hyphens
+    .replace(/\s+/g, '')
+    .replace(/-/g, ''); // Remove hyphens (W-2 -> W2, 1099-R -> 1099R)
+
+  // Format: Entity_Year_DocumentType or DocumentType_Year if no entity
+  if (cleanEntity) {
+    return `${cleanEntity}_${metadata.year}_${cleanType}`;
+  } else {
+    return `${cleanType}_${metadata.year}`;
+  }
+}
+
+// Quick metadata extraction using gpt-4o-mini for fast matching/naming
+export async function quickExtractDocumentMetadata(
+  filePath: string
+): Promise<QuickDocumentMetadata> {
+  let uploadedFileId: string | null = null;
+  
+  try {
+    // Upload PDF to OpenAI Files API
+    const file = await openai.files.create({
+      file: fs.createReadStream(filePath),
+      purpose: "user_data",
+    });
+    
+    uploadedFileId = file.id;
+
+    // Use gpt-4o-mini for fast, cheap metadata extraction
+    const response = await openai.responses.create({
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              file_id: file.id,
+            },
+            {
+              type: "input_text",
+              text: `Extract basic metadata from this tax document for matching and naming purposes.
+
+Identify:
+1. Document type (e.g., "W-2", "1099-R", "1099-NEC", "Schedule K-1", "1040", "Form 8889", etc.)
+2. Entity name if applicable (employer name for W-2, payer name for 1099s, business name for Schedule C, entity name for K-1, lender name for 1098, etc.)
+3. Tax year (4-digit year)
+
+Respond in JSON format:
+{
+  "documentType": "exact form name or type",
+  "entity": "entity name or null if not applicable",
+  "year": "YYYY"
+}
+
+Examples:
+- W-2 from ACME Corp for 2024 → {"documentType": "W-2", "entity": "ACME Corp", "year": "2024"}
+- 1099-R from Vanguard for 2024 → {"documentType": "1099-R", "entity": "Vanguard", "year": "2024"}
+- Form 1040 for 2023 → {"documentType": "Form 1040", "entity": null, "year": "2023"}
+- Foreign bank account statement → {"documentType": "Foreign Bank Account Statement", "entity": null, "year": "2024"}`
+            }
+          ]
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    });
+
+    const metadata = JSON.parse(response.output_text || "{}");
+    
+    return {
+      documentType: metadata.documentType || "Unknown Document",
+      entity: metadata.entity || null,
+      year: metadata.year || new Date().getFullYear().toString()
+    };
+  } catch (error: any) {
+    console.error("Quick metadata extraction error:", error);
+    // Return fallback metadata
+    return {
+      documentType: "Unknown Document",
+      entity: null,
+      year: new Date().getFullYear().toString()
+    };
+  } finally {
+    // Clean up uploaded file
+    if (uploadedFileId) {
+      try {
+        await openai.files.delete(uploadedFileId);
+      } catch (error) {
+        console.error("Failed to delete uploaded file:", uploadedFileId);
+      }
+    }
+  }
+}
+
 export async function validateTaxReturn(
   fileName: string,
   filePath: string,
