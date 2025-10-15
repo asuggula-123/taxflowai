@@ -1027,9 +1027,15 @@ IMPORTANT: Always evaluate for memories. If the accountant states a firm policy 
             name: { type: "string" as const },
             documentType: { type: "string" as const },
             year: { type: "string" as const },
-            entity: { type: "string" as const }
+            entity: { 
+              anyOf: [
+                { type: "string" as const },
+                { type: "null" as const }
+              ],
+              description: "Entity name if applicable"
+            }
           },
-          required: ["name", "documentType", "year"],
+          required: ["name", "documentType", "year", "entity"],
           additionalProperties: false
         }
       },
