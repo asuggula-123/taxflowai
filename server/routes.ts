@@ -629,6 +629,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk create documents from AI suggestions
+  app.post("/api/intakes/:intakeId/documents/bulk-create", async (req, res) => {
+    try {
+      const { documents } = req.body;
+      
+      if (!Array.isArray(documents) || documents.length === 0) {
+        return res.status(400).json({ error: "Expected array of documents" });
+      }
+
+      const createdDocuments = [];
+      for (const doc of documents) {
+        if (!doc.name || !doc.documentType || !doc.year) {
+          console.warn("Skipping invalid document:", doc);
+          continue;
+        }
+
+        const created = await storage.createDocument({
+          intakeId: req.params.intakeId,
+          name: doc.name,
+          documentType: doc.documentType,
+          year: doc.year,
+          entity: doc.entity || null,
+          status: "requested",
+        });
+        
+        createdDocuments.push(created);
+      }
+
+      console.log(`Bulk created ${createdDocuments.length} documents from AI suggestions`);
+      res.status(201).json({ documents: createdDocuments });
+    } catch (error) {
+      console.error("Bulk create documents error:", error);
+      res.status(500).json({ error: "Failed to bulk create documents" });
+    }
+  });
+
   // Update document
   app.patch("/api/documents/:id", async (req, res) => {
     try {
