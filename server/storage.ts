@@ -32,7 +32,7 @@ export interface IStorage {
   getDocumentsByIntake(intakeId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
   updateDocument(id: string, updates: Partial<Omit<Document, 'id' | 'intakeId' | 'createdAt'>>): Promise<Document | undefined>;
-  updateDocumentStatus(id: string, status: string, filePath?: string, name?: string): Promise<Document | undefined>;
+  updateDocumentStatus(id: string, status: string, filePath?: string, name?: string, openaiFileId?: string | null): Promise<Document | undefined>;
   deleteDocument(id: string): Promise<boolean>;
 
   // Chat message operations
@@ -183,6 +183,8 @@ export class MemStorage implements IStorage {
       documentType: insertDocument.documentType || null,
       year: insertDocument.year || null,
       entity: insertDocument.entity || null,
+      openaiFileId: insertDocument.openaiFileId || null,
+      fileHash: insertDocument.fileHash || null,
       provenance: insertDocument.provenance || null,
       createdAt: new Date(),
     };
@@ -206,7 +208,8 @@ export class MemStorage implements IStorage {
     id: string,
     status: string,
     filePath?: string,
-    name?: string
+    name?: string,
+    openaiFileId?: string | null
   ): Promise<Document | undefined> {
     const document = this.documents.get(id);
     if (!document) return undefined;
@@ -215,7 +218,8 @@ export class MemStorage implements IStorage {
       ...document, 
       status, 
       filePath: filePath || document.filePath,
-      name: name || document.name
+      name: name || document.name,
+      openaiFileId: openaiFileId !== undefined ? openaiFileId : document.openaiFileId
     };
     this.documents.set(id, updated);
     return updated;

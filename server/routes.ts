@@ -278,129 +278,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const matchedDocIds = new Set<string>();
 
       for (const file of files) {
-        // Phase 1: Quick metadata extraction with gpt-4o-mini
-        progressService.sendProgress({
-          customerId,
-          uploadId,
-          step: "analyzing",
-          message: "Extracting document metadata...",
-          progress: 20
-        });
+        let openaiFileId: string | null = null;
 
-        const metadata = await quickExtractDocumentMetadata(file.path);
-        const cleanName = generateDocumentName(metadata);
-        
-        // Emit matching progress
-        progressService.sendProgress({
-          customerId,
-          uploadId,
-          step: "matching",
-          message: "Matching documents to requests...",
-          progress: 40
-        });
+        try {
+          // Phase 1: Quick metadata extraction with gpt-4o-mini (uploads file once)
+          progressService.sendProgress({
+            customerId,
+            uploadId,
+            step: "analyzing",
+            message: "Extracting document metadata...",
+            progress: 20
+          });
 
-        // Find best matching requested document using AI-extracted metadata
-        let bestMatch: typeof availableRequestedDocs[0] | null = null;
-        let bestScore = 0;
-        
-        for (const requested of availableRequestedDocs) {
-          // Skip if already matched in this batch
-          if (matchedDocIds.has(requested.id)) continue;
+          const extraction = await quickExtractDocumentMetadata(file.path);
+          const metadata = extraction.metadata;
+          openaiFileId = extraction.fileId;
+          const cleanName = generateDocumentName(metadata);
           
-          // Skip if requested doc doesn't have metadata
-          if (!requested.documentType || !requested.year) continue;
+          // Emit matching progress
+          progressService.sendProgress({
+            customerId,
+            uploadId,
+            step: "matching",
+            message: "Matching documents to requests...",
+            progress: 40
+          });
+
+          // Find best matching requested document using AI-extracted metadata
+          let bestMatch: typeof availableRequestedDocs[0] | null = null;
+          let bestScore = 0;
           
-          let score = 0;
-          
-          // Match on document type (most important)
-          const normalizeDocType = (type: string) => 
-            type.toLowerCase().replace(/[^a-z0-9]/g, '');
-          
-          if (normalizeDocType(metadata.documentType) === normalizeDocType(requested.documentType)) {
-            score += 0.5; // 50% for matching document type
-          }
-          
-          // Match on year (important)
-          if (metadata.year === requested.year) {
-            score += 0.3; // 30% for matching year
-          }
-          
-          // Match on entity (if both have entity)
-          if (metadata.entity && requested.entity) {
-            const normalizeEntity = (entity: string) => 
-              entity.toLowerCase().replace(/[^a-z0-9]/g, '');
+          for (const requested of availableRequestedDocs) {
+            // Skip if already matched in this batch
+            if (matchedDocIds.has(requested.id)) continue;
             
-            if (normalizeEntity(metadata.entity) === normalizeEntity(requested.entity)) {
-              score += 0.2; // 20% for matching entity
+            // Skip if requested doc doesn't have metadata
+            if (!requested.documentType || !requested.year) continue;
+            
+            let score = 0;
+            
+            // Match on document type (most important)
+            const normalizeDocType = (type: string) => 
+              type.toLowerCase().replace(/[^a-z0-9]/g, '');
+            
+            if (normalizeDocType(metadata.documentType) === normalizeDocType(requested.documentType)) {
+              score += 0.5; // 50% for matching document type
             }
-          } else if (!metadata.entity && !requested.entity) {
-            // Both have no entity - slight bonus
-            score += 0.1;
+            
+            // Match on year (important)
+            if (metadata.year === requested.year) {
+              score += 0.3; // 30% for matching year
+            }
+            
+            // Match on entity (if both have entity)
+            if (metadata.entity && requested.entity) {
+              const normalizeEntity = (entity: string) => 
+                entity.toLowerCase().replace(/[^a-z0-9]/g, '');
+              
+              if (normalizeEntity(metadata.entity) === normalizeEntity(requested.entity)) {
+                score += 0.2; // 20% for matching entity
+              }
+            } else if (!metadata.entity && !requested.entity) {
+              // Both have no entity - slight bonus
+              score += 0.1;
+            }
+            
+            // Require at least document type and year match (80% score)
+            if (score >= 0.8 && score > bestScore) {
+              bestScore = score;
+              bestMatch = requested;
+            }
           }
           
-          // Require at least document type and year match (80% score)
-          if (score >= 0.8 && score > bestScore) {
-            bestScore = score;
-            bestMatch = requested;
+          const matchingRequested = bestMatch;
+
+          let document;
+          if (matchingRequested) {
+            // Update existing requested document with clean AI-generated name, metadata, and OpenAI file ID
+            document = await storage.updateDocumentStatus(
+              matchingRequested.id, 
+              "completed", 
+              file.path,
+              cleanName,
+              openaiFileId
+            );
+            // Mark as matched to prevent reuse in this batch
+            matchedDocIds.add(matchingRequested.id);
+          } else {
+            // Create new document with clean AI-generated name, metadata, and OpenAI file ID
+            document = await storage.createDocument({
+              intakeId: req.params.intakeId,
+              name: cleanName,
+              documentType: metadata.documentType,
+              year: metadata.year,
+              entity: metadata.entity,
+              status: "completed",
+              filePath: file.path,
+              openaiFileId: openaiFileId,
+            });
           }
-        }
-        
-        const matchingRequested = bestMatch;
+          
+          if (document) {
+            uploadedDocs.push(document);
+          }
+          
+          // Phase 2: Deep analysis with gpt-5 (reuses uploaded file)
+          progressService.sendProgress({
+            customerId,
+            uploadId,
+            step: "analyzing",
+            message: "Performing deep analysis...",
+            progress: 60
+          });
 
-        let document;
-        if (matchingRequested) {
-          // Update existing requested document with clean AI-generated name and metadata
-          document = await storage.updateDocumentStatus(
-            matchingRequested.id, 
-            "completed", 
-            file.path,
-            cleanName
+          const analysis = await analyzeDocument(
+            file.originalname, 
+            file.path, 
+            req.params.intakeId, 
+            uploadId,
+            openaiFileId // Pass file_id to reuse
           );
-          // Mark as matched to prevent reuse in this batch
-          matchedDocIds.add(matchingRequested.id);
-        } else {
-          // Create new document with clean AI-generated name and metadata
-          document = await storage.createDocument({
-            intakeId: req.params.intakeId,
-            name: cleanName,
-            documentType: metadata.documentType,
-            year: metadata.year,
-            entity: metadata.entity,
-            status: "completed",
-            filePath: file.path,
-          });
-        }
-        
-        if (document) {
-          uploadedDocs.push(document);
-        }
-        
-        // Phase 2: Deep analysis with gpt-5
-        progressService.sendProgress({
-          customerId,
-          uploadId,
-          step: "analyzing",
-          message: "Performing deep analysis...",
-          progress: 60
-        });
-
-        const analysis = await analyzeDocument(file.originalname, file.path, req.params.intakeId, uploadId);
-        
-        // If analysis failed, create error message but don't fail the upload (document is already created)
-        if (!analysis.isValid) {
-          await storage.createChatMessage({
-            intakeId: req.params.intakeId,
-            sender: "ai",
-            content: `⚠️ ${cleanName}: ${analysis.feedback}`,
-          });
-        } else {
-          // Create AI response message for successful analysis
-          const aiMessage = await storage.createChatMessage({
-            intakeId: req.params.intakeId,
-            sender: "ai",
-            content: analysis.feedback,
-          });
-          aiResponses.push(aiMessage);
+          
+          // If analysis failed, create error message but don't fail the upload (document is already created)
+          if (!analysis.isValid) {
+            await storage.createChatMessage({
+              intakeId: req.params.intakeId,
+              sender: "ai",
+              content: `⚠️ ${cleanName}: ${analysis.feedback}`,
+            });
+          } else {
+            // Create AI response message for successful analysis
+            const aiMessage = await storage.createChatMessage({
+              intakeId: req.params.intakeId,
+              sender: "ai",
+              content: analysis.feedback,
+            });
+            aiResponses.push(aiMessage);
+          }
+        } catch (error) {
+          // Clean up OpenAI file if upload failed
+          if (openaiFileId) {
+            try {
+              await openai.files.delete(openaiFileId);
+            } catch (cleanupError) {
+              console.error("Failed to delete OpenAI file on error:", cleanupError);
+            }
+          }
+          throw error; // Re-throw to be handled by outer catch
         }
       }
 

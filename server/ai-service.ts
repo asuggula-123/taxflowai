@@ -104,6 +104,11 @@ export interface QuickDocumentMetadata {
   year: string;
 }
 
+export interface QuickExtractionResult {
+  metadata: QuickDocumentMetadata;
+  fileId: string;
+}
+
 // Helper function to generate clean document names from metadata
 export function generateDocumentName(metadata: QuickDocumentMetadata): string {
   // Clean up entity name for filename (remove special chars, spaces)
@@ -129,19 +134,16 @@ export function generateDocumentName(metadata: QuickDocumentMetadata): string {
 }
 
 // Quick metadata extraction using gpt-4o-mini for fast matching/naming
+// Returns metadata AND file_id for reuse in deep analysis
 export async function quickExtractDocumentMetadata(
   filePath: string
-): Promise<QuickDocumentMetadata> {
-  let uploadedFileId: string | null = null;
-  
+): Promise<QuickExtractionResult> {
   try {
     // Upload PDF to OpenAI Files API
     const file = await openai.files.create({
       file: fs.createReadStream(filePath),
       purpose: "user_data",
     });
-    
-    uploadedFileId = file.id;
 
     // Use gpt-4o-mini for fast, cheap metadata extraction
     const response = await openai.responses.create({
@@ -185,27 +187,16 @@ Examples:
     const metadata = JSON.parse(response.output_text || "{}");
     
     return {
-      documentType: metadata.documentType || "Unknown Document",
-      entity: metadata.entity || null,
-      year: metadata.year || new Date().getFullYear().toString()
+      metadata: {
+        documentType: metadata.documentType || "Unknown Document",
+        entity: metadata.entity || null,
+        year: metadata.year || new Date().getFullYear().toString()
+      },
+      fileId: file.id // Return file_id for reuse
     };
   } catch (error: any) {
     console.error("Quick metadata extraction error:", error);
-    // Return fallback metadata
-    return {
-      documentType: "Unknown Document",
-      entity: null,
-      year: new Date().getFullYear().toString()
-    };
-  } finally {
-    // Clean up uploaded file
-    if (uploadedFileId) {
-      try {
-        await openai.files.delete(uploadedFileId);
-      } catch (error) {
-        console.error("Failed to delete uploaded file:", uploadedFileId);
-      }
-    }
+    throw error; // Let caller handle error and cleanup
   }
 }
 
@@ -323,9 +314,11 @@ export async function analyzeDocument(
   fileName: string,
   filePath: string,
   intakeId: string,
-  uploadId?: string
+  uploadId?: string,
+  existingFileId?: string // Optional: reuse existing OpenAI file_id
 ): Promise<DocumentAnalysis> {
-  let uploadedFileId: string | null = null;
+  let uploadedFileId: string | null = existingFileId || null;
+  const shouldCleanup = !existingFileId; // Only cleanup if we uploaded the file ourselves
   
   try {
     // Get intake and customer for progress tracking
@@ -335,25 +328,28 @@ export async function analyzeDocument(
     }
     const customerId = intake.customerId;
     
-    // Validate file exists and size
-    const stats = fs.statSync(filePath);
-    const fileSizeMB = stats.size / (1024 * 1024);
-    
-    if (fileSizeMB > 10) {
-      throw new Error(`File size (${fileSizeMB.toFixed(2)}MB) exceeds 10MB limit`);
-    }
-    
-    if (stats.size === 0) {
-      throw new Error("File is empty");
-    }
+    // Only upload if no existing file_id provided
+    if (!existingFileId) {
+      // Validate file exists and size
+      const stats = fs.statSync(filePath);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      
+      if (fileSizeMB > 10) {
+        throw new Error(`File size (${fileSizeMB.toFixed(2)}MB) exceeds 10MB limit`);
+      }
+      
+      if (stats.size === 0) {
+        throw new Error("File is empty");
+      }
 
-    // Upload PDF to OpenAI Files API
-    const file = await openai.files.create({
-      file: fs.createReadStream(filePath),
-      purpose: "user_data",
-    });
-    
-    uploadedFileId = file.id;
+      // Upload PDF to OpenAI Files API
+      const file = await openai.files.create({
+        file: fs.createReadStream(filePath),
+        purpose: "user_data",
+      });
+      
+      uploadedFileId = file.id;
+    }
 
     // Analyze the uploaded PDF using Responses API
     const response = await openai.responses.create({
@@ -364,7 +360,7 @@ export async function analyzeDocument(
           content: [
             {
               type: "input_file",
-              file_id: file.id,
+              file_id: uploadedFileId!,
             },
             {
               type: "input_text",
@@ -502,8 +498,8 @@ IMPORTANT:
       }
     }
     
-    // Clean up uploaded file from OpenAI
-    if (uploadedFileId) {
+    // Clean up uploaded file from OpenAI (only if we uploaded it ourselves, not if it was passed in)
+    if (uploadedFileId && shouldCleanup) {
       try {
         await openai.files.delete(uploadedFileId);
       } catch (cleanupError) {
