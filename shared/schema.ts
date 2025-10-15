@@ -50,6 +50,8 @@ export const documents = pgTable("documents", {
   entity: text("entity"),
   status: text("status").notNull().default("requested"),
   filePath: text("file_path"),
+  openaiFileId: text("openai_file_id"), // OpenAI file ID for viewing/downloading
+  fileHash: text("file_hash"), // SHA-256 hash for duplicate detection
   provenance: text("provenance"), // JSON string: {page?: number, lineReference?: string, evidence: string}
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
