@@ -116,6 +116,12 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 - Entity can be added, updated, or cleared (set to null) through edit dialog
 
 ### AI Improvements (October 15, 2025)
+- **Structured Outputs Migration**: Migrated from `json_object` to `json_schema` response format for guaranteed schema compliance
+  - Defines strict JSON schema with required fields: `message`, `requestedDocuments`, `detectedMemories`
+  - Schema enforcement prevents AI from skipping `detectedMemories` array - it must always be present (even if empty)
+  - Each memory object requires: `type` (enum: "firm" or "customer"), `content`, `reason`
+  - Fixes bug where AI acknowledged memories in message text but didn't return them in the array
+  - Prompt simplified to trust GPT-5's semantic understanding with clear instructions about when to populate vs leave empty
 - **Simplified Memory Detection**: Removed prescriptive examples and pattern-matching constraints from AI prompt
   - Now trusts GPT-5's semantic understanding to identify firm policies and customer-specific facts
   - Minimal guidance instead of rigid rules allows AI to recognize memories from natural language
