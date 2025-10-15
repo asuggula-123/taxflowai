@@ -661,17 +661,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create accountant message
       const message = await storage.createChatMessage(validatedData);
 
-      // Run memory detection and chat response generation in parallel
-      const [detectedMemories, aiResponse] = await Promise.all([
-        detectMemories(validatedData.content, req.params.intakeId),
-        generateChatResponse(validatedData.content, req.params.intakeId)
-      ]);
+      // Generate AI response first
+      const aiResponse = await generateChatResponse(validatedData.content, req.params.intakeId);
 
       const aiMessage = await storage.createChatMessage({
         intakeId: req.params.intakeId,
         sender: "ai",
         content: aiResponse.message,
       });
+
+      // Now detect memories with full context (accountant question + AI response)
+      const detectedMemories = await detectMemories(validatedData.content, aiResponse.message, req.params.intakeId);
 
       // Create requested document entities if any
       if (aiResponse.requestedDocuments.length > 0) {
@@ -742,19 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.write(`event: accountant_message\n`);
       res.write(`data: ${JSON.stringify({ ...message, tempAccountantId })}\n\n`);
 
-      // Start parallel execution: memory detection and streaming response
-      let detectedMemories: any[] = [];
-      const memoryPromise = detectMemories(validatedData.content, req.params.intakeId).then(memories => {
-        detectedMemories = memories;
-        // Emit memories immediately when detected (during streaming)
-        if (memories.length > 0) {
-          res.write(`event: memories\n`);
-          res.write(`data: ${JSON.stringify({ detectedMemories: memories })}\n\n`);
-        }
-        return memories;
-      });
-      
-      // Start streaming chat response
+      // Start streaming chat response (memory detection will happen after)
       const customer = await storage.getCustomer(intake.customerId);
       const documents = await storage.getDocumentsByIntake(req.params.intakeId);
       const details = await storage.getCustomerDetailsByIntake(req.params.intakeId);
@@ -814,8 +802,14 @@ Instructions:
         content: fullMessage,
       });
 
-      // Wait for memory detection to complete (memories already emitted if found)
-      await memoryPromise;
+      // Now detect memories with full context (accountant question + AI response)
+      const detectedMemories = await detectMemories(validatedData.content, fullMessage, req.params.intakeId);
+      
+      // Emit memories if any detected
+      if (detectedMemories.length > 0) {
+        res.write(`event: memories\n`);
+        res.write(`data: ${JSON.stringify({ detectedMemories })}\n\n`);
+      }
 
       // Emit complete event with AI message and memories
       res.write(`event: complete\n`);
