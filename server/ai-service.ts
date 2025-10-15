@@ -98,6 +98,13 @@ interface TaxReturnValidation {
   errorMessage?: string;
 }
 
+interface QuickValidation {
+  isValid: boolean;
+  documentType: string;
+  taxYear?: number;
+  errorMessage?: string;
+}
+
 export async function validateTaxReturn(
   fileName: string,
   filePath: string,
@@ -195,6 +202,103 @@ Be precise and validate against actual document content.`
       isTaxYear2023: false,
       taxpayerNameMatches: false,
       errorMessage: error.message || "Failed to validate tax return"
+    };
+  } finally {
+    // Clean up uploaded file
+    if (uploadedFileId) {
+      try {
+        await openai.files.delete(uploadedFileId);
+      } catch (error) {
+        console.error("Failed to delete uploaded file:", uploadedFileId);
+      }
+    }
+  }
+}
+
+export async function quickValidateDocument(
+  fileName: string,
+  filePath: string
+): Promise<QuickValidation> {
+  let uploadedFileId: string | null = null;
+  
+  try {
+    // Validate file exists and size
+    const stats = fs.statSync(filePath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    
+    if (fileSizeMB > 10) {
+      return {
+        isValid: false,
+        documentType: "unknown",
+        errorMessage: `File size (${fileSizeMB.toFixed(2)}MB) exceeds 10MB limit`
+      };
+    }
+    
+    if (stats.size === 0) {
+      return {
+        isValid: false,
+        documentType: "unknown",
+        errorMessage: "File is empty"
+      };
+    }
+
+    // Upload PDF to OpenAI Files API
+    const file = await openai.files.create({
+      file: fs.createReadStream(filePath),
+      purpose: "user_data",
+    });
+    
+    uploadedFileId = file.id;
+
+    // Quick validation using Responses API
+    const response = await openai.responses.create({
+      model: "gpt-5",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              file_id: file.id,
+            },
+            {
+              type: "input_text",
+              text: `You are a tax document identifier. Quickly identify this document.
+
+Extract:
+1. Document type (e.g., "Form 1040", "W-2", "1099-NEC", "Schedule C", etc.)
+2. Tax year (the year this document is for)
+
+Respond in JSON format:
+{
+  "documentType": "Exact form name or type",
+  "taxYear": 2024,
+  "isValid": true/false,
+  "errorMessage": "Brief error if not a recognizable tax document"
+}
+
+Be precise and identify the document type from actual content.`
+            }
+          ]
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    });
+
+    const result = JSON.parse(response.output_text || "{}");
+    
+    return {
+      isValid: result.isValid !== false && !!result.documentType,
+      documentType: result.documentType || "unknown",
+      taxYear: result.taxYear,
+      errorMessage: result.errorMessage
+    };
+  } catch (error: any) {
+    console.error("Quick validation error:", error);
+    return {
+      isValid: false,
+      documentType: "unknown",
+      errorMessage: error.message || "Failed to validate document"
     };
   } finally {
     // Clean up uploaded file

@@ -384,16 +384,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const matchedDocIds = new Set<string>();
 
       for (const file of files) {
+        // Emit validating progress
+        progressService.sendProgress({
+          customerId,
+          uploadId,
+          step: "validating",
+          message: "Validating document...",
+          progress: 20
+        });
+
+        // Quick validation first to give immediate feedback
+        const quickValidation = await quickValidateDocument(file.originalname, file.path);
+        
+        if (!quickValidation.isValid) {
+          const errorMsg = quickValidation.errorMessage || "Document validation failed";
+          
+          // Emit error progress
+          progressService.sendProgress({
+            customerId,
+            uploadId,
+            step: "error",
+            message: errorMsg,
+            progress: 0
+          });
+          
+          await storage.createChatMessage({
+            intakeId: req.params.intakeId,
+            sender: "ai",
+            content: `⚠️ ${errorMsg}`,
+          });
+          
+          return res.status(400).json({ error: errorMsg });
+        }
+
         // Emit analyzing progress
         progressService.sendProgress({
           customerId,
           uploadId,
           step: "analyzing",
           message: "Analyzing document with AI...",
-          progress: 30
+          progress: 40
         });
 
-        // Analyze document with AI first
+        // Now do full analysis
         const analysis = await analyzeDocument(file.originalname, file.path, req.params.intakeId, uploadId);
         
         // If analysis failed, create error message and return error
