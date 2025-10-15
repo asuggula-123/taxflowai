@@ -995,32 +995,40 @@ Context:
 
 Your task: Identify ONLY information that is DIRECTLY RELEVANT to the accountant's specific question.
 
-CRITICAL RULES:
-1. Ignore incidental facts or background context mentioned in the response that don't directly address what the accountant asked about.
-2. When the accountant states a firm-wide policy (using "we/our/firm"), do NOT create a customer-specific memory when the AI applies that policy to the current customer.
-3. Only create customer-specific memories for facts UNIQUE to this customer, not AI's personalization of firm policies.
+ABSOLUTE RULES - MUST FOLLOW:
 
-Examples of CORRECT memory detection:
-- Accountant: "we always ask for foreign bank accounts" → FIRM memory: "we always ask for foreign bank account statements as well"
-- Accountant: "we always ask for foreign bank accounts" + AI: "James should provide foreign bank statements" → ONLY FIRM memory (AI is just applying firm policy)
-- Accountant: "Does he have RSUs?" + AI: "Yes, customer has RSUs at Google every year" → CUSTOMER memory: recurring RSU income from Google
+1. When accountant states a policy (using "we/our/firm/I always"), NEVER create a customer memory about that policy being applied to this customer. Only create a FIRM memory.
 
-Examples of INCORRECT memory detection (DO NOT DO THIS):
-- Accountant: "we always ask for X" + AI: "Customer should provide X" → DO NOT create customer memory (it's just AI applying firm policy)
-- Accountant asks about foreign accounts + AI mentions filing status → DO NOT capture filing status (not relevant to question)
+2. Only detect memories that are DIRECTLY RELATED to what the accountant asked. Ignore everything else.
 
-Detect as FIRM memory if:
-- Accountant uses "we/our/firm" language stating a policy/procedure ABOUT THE TOPIC they asked about
-- States a firm-wide standard DIRECTLY RELATED to the question
+3. Customer memories are ONLY for unique facts about THIS customer, never for how firm policies apply to them.
 
-Detect as CUSTOMER memory ONLY if:
-- Reveals a recurring pattern UNIQUE to this customer (not AI applying firm policy)
-- Material facts DIRECTLY ANSWERING the accountant's question that are customer-specific
-- Customer-specific preferences RELEVANT to what was asked
+DECISION TREE:
+└─ Did accountant state a policy/procedure? (uses "we/our/firm/I always")
+    ├─ YES → Create FIRM memory ONLY. Never create customer memory.
+    └─ NO → Did AI reveal customer-specific fact?
+        ├─ YES + Related to question → Create CUSTOMER memory
+        └─ NO or Unrelated → No memory
 
-If the accountant states a firm policy and the AI merely applies it to the current customer, return ONLY the firm memory, NOT a customer-specific one.
+Examples that should create FIRM MEMORY ONLY:
+• Accountant: "we always ask for foreign bank account statements" 
+  → FIRM: "Always ask for foreign bank account statements"
+  → DO NOT create customer memory even if AI says "James should provide foreign bank statements"
 
-If nothing directly relevant and memorable, return empty array.`;
+• Accountant: "I always need the business P&L by March" 
+  → FIRM: "Always need business P&L by March"
+  → DO NOT create customer memory about James needing to provide P&L
+
+Examples that should create CUSTOMER MEMORY:
+• Accountant: "Does he have RSUs?" + AI: "Yes, recurring RSU income from Google"
+  → CUSTOMER: "Has recurring RSU income from Google every year"
+
+• Accountant: "What's his filing status?" + AI: "Married filing jointly"
+  → CUSTOMER: "Filing status: Married filing jointly"
+
+Examples that should create NO MEMORY:
+• Accountant asks about RSUs + AI mentions unrelated filing status → No memory
+• AI restates what accountant said without new info → No memory`;
 
   const memorySchema = {
     type: "object" as const,
