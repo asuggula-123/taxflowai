@@ -184,18 +184,11 @@ export default function CustomerDetail() {
               // Clear streaming message state
               setStreamingMessage(null);
 
-              // Auto-create requested documents
+              // Documents are auto-created server-side in streaming endpoint
               if (requestedDocuments.length > 0) {
-                console.log("AI requested documents:", requestedDocuments);
-                // Create documents via API
-                fetch(`/api/intakes/${intakeId}/documents/bulk-create`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ documents: requestedDocuments }),
-                }).then(() => {
-                  // Refresh documents list
-                  queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
-                }).catch(err => console.error("Failed to create documents:", err));
+                console.log("Frontend: AI requested documents:", requestedDocuments);
+                // Refresh documents list to show server-created documents
+                queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
               }
 
               // Add real persisted message to cache
