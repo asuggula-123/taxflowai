@@ -5,7 +5,7 @@ import multer from "multer";
 import { insertCustomerSchema, insertTaxYearIntakeSchema, insertChatMessageSchema } from "@shared/schema";
 import path from "path";
 import { mkdir } from "fs/promises";
-import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn } from "./ai-service";
+import { analyzeDocument, determineNextSteps, generateChatResponse, validateTaxReturn, quickExtractDocumentMetadata, generateDocumentName } from "./ai-service";
 import { progressService } from "./progress-service";
 import { randomUUID } from "crypto";
 import OpenAI from "openai";
@@ -272,87 +272,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const uploadedDocs = [];
       const aiResponses = [];
 
-      // Helper function to normalize and tokenize document names
-      const normalizeToTokens = (name: string): Set<string> => {
-        // Generic filler words to exclude
-        const fillerWords = new Set(['form', 'document', 'documents', 'file', 'copy', 'final', 'draft', 'the', 'a', 'an']);
-        
-        let normalized = name.toLowerCase();
-        
-        // Remove file extension
-        normalized = normalized.replace(/\.(pdf|jpg|jpeg|png|doc|docx)$/i, '');
-        
-        // Preserve common tax form identifiers by removing hyphens within them
-        // W-2 -> w2, 1099-MISC -> 1099misc, etc.
-        normalized = normalized.replace(/\b(w)-?(2)\b/g, 'w2');
-        normalized = normalized.replace(/\b(1099)-?([a-z]*)\b/g, '1099$2');
-        normalized = normalized.replace(/\b(1040)-?([a-z]*)\b/g, '1040$2');
-        normalized = normalized.replace(/\b(1098)-?([a-z]*)\b/g, '1098$2');
-        
-        // Now replace remaining punctuation with spaces
-        normalized = normalized.replace(/[_\-.,;:()\[\]{}]/g, ' ');
-        normalized = normalized.replace(/\s+/g, ' ').trim();
-        
-        // Split into tokens, filter out short words and filler words
-        const tokens = normalized.split(' ')
-          .filter(t => t.length > 1 && !fillerWords.has(t));
-        
-        return new Set(tokens);
-      };
-
-      // Calculate similarity score between two token sets
-      const calculateSimilarity = (requested: Set<string>, upload: Set<string>): number => {
-        if (requested.size === 0 || upload.size === 0) return 0;
-        
-        // Count how many requested tokens appear in upload
-        let matches = 0;
-        const requestedTokens = Array.from(requested);
-        for (const token of requestedTokens) {
-          if (upload.has(token)) matches++;
-        }
-        
-        // Return ratio of matched requested tokens (0.0 to 1.0)
-        return matches / requested.size;
-      };
-
       // Fetch requested documents once before processing files
       const allDocs = await storage.getDocumentsByIntake(req.params.intakeId);
       let availableRequestedDocs = allDocs.filter((d) => d.status === "requested");
       const matchedDocIds = new Set<string>();
 
       for (const file of files) {
-        // Emit analyzing progress
+        // Phase 1: Quick metadata extraction with gpt-4o-mini
         progressService.sendProgress({
           customerId,
           uploadId,
           step: "analyzing",
-          message: "Analyzing document with AI...",
-          progress: 30
+          message: "Extracting document metadata...",
+          progress: 20
         });
 
-        // Analyze document with AI
-        const analysis = await analyzeDocument(file.originalname, file.path, req.params.intakeId, uploadId);
-        
-        // If analysis failed, create error message and return error
-        if (!analysis.isValid) {
-          // Emit error progress
-          progressService.sendProgress({
-            customerId,
-            uploadId,
-            step: "error",
-            message: analysis.feedback,
-            progress: 0
-          });
-          
-          await storage.createChatMessage({
-            intakeId: req.params.intakeId,
-            sender: "ai",
-            content: `⚠️ Failed to analyze ${file.originalname}: ${analysis.feedback}`,
-          });
-          return res.status(400).json({ error: analysis.feedback });
-        }
-        
-        const uploadTokens = normalizeToTokens(file.originalname);
+        const metadata = await quickExtractDocumentMetadata(file.path);
+        const cleanName = generateDocumentName(metadata);
         
         // Emit matching progress
         progressService.sendProgress({
@@ -360,10 +296,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           uploadId,
           step: "matching",
           message: "Matching documents to requests...",
-          progress: 60
+          progress: 40
         });
 
-        // Find best matching requested document from available (unmatched) requests
+        // Find best matching requested document using AI-extracted metadata
         let bestMatch: typeof availableRequestedDocs[0] | null = null;
         let bestScore = 0;
         
@@ -371,23 +307,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Skip if already matched in this batch
           if (matchedDocIds.has(requested.id)) continue;
           
-          const requestedTokens = normalizeToTokens(requested.name);
+          // Skip if requested doc doesn't have metadata
+          if (!requested.documentType || !requested.year) continue;
           
-          // Skip if no tokens to compare
-          if (requestedTokens.size === 0 || uploadTokens.size === 0) continue;
+          let score = 0;
           
-          const score = calculateSimilarity(requestedTokens, uploadTokens);
+          // Match on document type (most important)
+          const normalizeDocType = (type: string) => 
+            type.toLowerCase().replace(/[^a-z0-9]/g, '');
           
-          // Boost score if there's a year match (indicates same tax period)
-          const hasYearMatch = Array.from(requestedTokens).some(t => 
-            /^\d{4}$/.test(t) && uploadTokens.has(t)
-          );
-          const boostedScore = hasYearMatch ? Math.min(score + 0.3, 1.0) : score;
+          if (normalizeDocType(metadata.documentType) === normalizeDocType(requested.documentType)) {
+            score += 0.5; // 50% for matching document type
+          }
           
-          // Lower threshold: at least 30% of requested tokens must be present
-          // or if there's a year match with any other token overlap
-          if (boostedScore >= 0.3 && boostedScore > bestScore) {
-            bestScore = boostedScore;
+          // Match on year (important)
+          if (metadata.year === requested.year) {
+            score += 0.3; // 30% for matching year
+          }
+          
+          // Match on entity (if both have entity)
+          if (metadata.entity && requested.entity) {
+            const normalizeEntity = (entity: string) => 
+              entity.toLowerCase().replace(/[^a-z0-9]/g, '');
+            
+            if (normalizeEntity(metadata.entity) === normalizeEntity(requested.entity)) {
+              score += 0.2; // 20% for matching entity
+            }
+          } else if (!metadata.entity && !requested.entity) {
+            // Both have no entity - slight bonus
+            score += 0.1;
+          }
+          
+          // Require at least document type and year match (80% score)
+          if (score >= 0.8 && score > bestScore) {
+            bestScore = score;
             bestMatch = requested;
           }
         }
@@ -396,20 +349,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         let document;
         if (matchingRequested) {
-          // Update existing requested document with actual uploaded filename
+          // Update existing requested document with clean AI-generated name and metadata
           document = await storage.updateDocumentStatus(
             matchingRequested.id, 
             "completed", 
             file.path,
-            file.originalname
+            cleanName
           );
           // Mark as matched to prevent reuse in this batch
           matchedDocIds.add(matchingRequested.id);
         } else {
-          // Create new document
+          // Create new document with clean AI-generated name and metadata
           document = await storage.createDocument({
             intakeId: req.params.intakeId,
-            name: file.originalname,
+            name: cleanName,
+            documentType: metadata.documentType,
+            year: metadata.year,
+            entity: metadata.entity,
             status: "completed",
             filePath: file.path,
           });
@@ -419,13 +375,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
           uploadedDocs.push(document);
         }
         
-        // Create AI response message for successful analysis
-        const aiMessage = await storage.createChatMessage({
-          intakeId: req.params.intakeId,
-          sender: "ai",
-          content: analysis.feedback,
+        // Phase 2: Deep analysis with gpt-5
+        progressService.sendProgress({
+          customerId,
+          uploadId,
+          step: "analyzing",
+          message: "Performing deep analysis...",
+          progress: 60
         });
-        aiResponses.push(aiMessage);
+
+        const analysis = await analyzeDocument(file.originalname, file.path, req.params.intakeId, uploadId);
+        
+        // If analysis failed, create error message but don't fail the upload (document is already created)
+        if (!analysis.isValid) {
+          await storage.createChatMessage({
+            intakeId: req.params.intakeId,
+            sender: "ai",
+            content: `⚠️ ${cleanName}: ${analysis.feedback}`,
+          });
+        } else {
+          // Create AI response message for successful analysis
+          const aiMessage = await storage.createChatMessage({
+            intakeId: req.params.intakeId,
+            sender: "ai",
+            content: analysis.feedback,
+          });
+          aiResponses.push(aiMessage);
+        }
       }
 
       // Emit generating progress
