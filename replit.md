@@ -120,10 +120,12 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
   - Now trusts GPT-5's semantic understanding to identify firm policies and customer-specific facts
   - Minimal guidance instead of rigid rules allows AI to recognize memories from natural language
   - Handles pronouns and varied phrasings ("we always ask for that", "he forgets to mention")
-- **Enhanced Upload Error Handling**: Client now parses server error responses for specific validation messages
-  - Nested try/catch handles JSON parsing failures and network errors with actionable fallbacks
-  - Users see specific errors (wrong document type, wrong year) instead of generic "Upload failed"
-  - Robust error flow: parse server JSON → fallback to generic message → catch network errors
+- **Instant Validation Feedback**: Restructured upload flow for immediate error feedback
+  - Form 1040 validation runs BEFORE any progress emissions or AI analysis
+  - Validation errors return HTTP 400 with specific JSON messages instantly (no AI delay)
+  - Client cleanly parses server errors and displays exact validation messages in toast
+  - Users get immediate feedback on taxpayer name mismatches, wrong years, or incorrect document types
+  - Error flow: server validates → HTTP 400 → client parses JSON → displays in toast
 
 ### Bug Fixes
 - **Customer Type Fix**: Removed status field from Customer type (status now on intakes only)
