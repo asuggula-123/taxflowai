@@ -291,6 +291,7 @@ export default function CustomerDetail() {
     mutationFn: async ({ content, type }: { content: string; type: 'firm' | 'customer' }) => {
       // Step 1: Create the memory entity (for audit trail)
       await apiRequest("POST", "/api/memories", {
+        type,
         customerId: type === 'customer' ? customerId : null,
         content,
       });
