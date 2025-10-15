@@ -29,11 +29,13 @@ The frontend uses React with TypeScript, styled with Tailwind CSS and Shadcn UI 
 ### Feature Specifications
 - **Customer Management**: CRUD operations for customers.
 - **Multi-Year Intake System**: Each customer can have multiple tax year intakes, with independent documents, chat, and status per year. Includes a year selection dropdown and dynamic Form 1040 validation.
-- **AI-Powered Document Analysis**: Intelligent feedback on uploaded tax documents, including validation and information extraction from PDF content.
+- **AI-Powered Document Analysis**: Intelligent feedback on uploaded tax documents, including validation and information extraction from PDF content. Two-tier AI approach: GPT-4o-mini for quick metadata extraction (~500ms) for matching/naming, GPT-5 for deep entity analysis.
+- **Smart Document Naming**: Documents automatically renamed using pattern `Entity_DocumentType_Year` (e.g., "JamesCavin_Form1040_2023"). Entity extraction varies by document type: taxpayer name for Form 1040s, employer name for W-2s, payer name for 1099s, business name for Schedule C, etc. Falls back to `DocumentType_Year` if no entity applicable.
 - **Smart Chat Interface**: AI agent requests missing documents, validates completeness, and can create document entities from chat conversations.
 - **Structured Workflow**: A three-phase gated workflow per intake (Awaiting Tax Return, Incomplete, Ready) with automatic status tracking.
 - **Memory System**: A hybrid memory approach with individual Memory entities for audit trail and synthesized notes for clean AI context. Supports firm-level and customer-level memories, with inline confirmation UI. Context-aware memory detection distinguishes firm-wide policies from customer-specific facts - when accountants use "we/our/firm" language to state policies, only firm memories are created (not redundant customer memories). "Remember" button triggers full synthesis workflow with immediate toast feedback.
 - **Entity Field Implementation**: Structured entity field for documents to store company/organization names, displayed as visual pills/badges.
+- **Safe Value Rendering**: Customer details safely handle structured data (objects, arrays) from AI extraction. Values like `{Salary: 51484.88, Commission: 0}` are formatted as readable text ("Salary: $51,484.88") to prevent React rendering crashes.
 
 ### System Design Choices
 - **In-memory storage (MemStorage)** for current MVP, with future plans for PostgreSQL.
