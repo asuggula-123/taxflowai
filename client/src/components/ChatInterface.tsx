@@ -5,20 +5,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Send, FileText, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ProgressSteps, type ProgressStep } from "./ProgressSteps";
-import { MemoryConfirmation } from "./MemoryConfirmation";
-
-export interface DetectedMemory {
-  type: 'firm' | 'customer';
-  content: string;
-  reason: string;
-}
 
 export interface ChatMessage {
   id: string;
   sender: "accountant" | "ai";
   content: string;
   timestamp: Date;
-  detectedMemories?: DetectedMemory[];
 }
 
 interface ChatInterfaceProps {
@@ -33,9 +25,6 @@ interface ChatInterfaceProps {
   progressValue?: number;
   customerId?: string;
   intakeYear?: string;
-  onConfirmMemory?: (messageId: string, memory: DetectedMemory) => void;
-  onDismissMemory?: (messageId: string, memoryIndex: number) => void;
-  isConfirmingMemory?: boolean;
 }
 
 export function ChatInterface({
@@ -50,9 +39,6 @@ export function ChatInterface({
   progressValue = 0,
   customerId,
   intakeYear,
-  onConfirmMemory,
-  onDismissMemory,
-  isConfirmingMemory = false,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -120,19 +106,6 @@ export function ChatInterface({
                   </span>
                 </div>
               </div>
-              {message.sender === "ai" && message.detectedMemories && message.detectedMemories.length > 0 && (
-                <div className="flex justify-start">
-                  <div className="max-w-[80%]">
-                    <MemoryConfirmation
-                      memories={message.detectedMemories}
-                      customerId={customerId || null}
-                      onConfirm={(memory) => onConfirmMemory?.(message.id, memory)}
-                      onDismiss={(index) => onDismissMemory?.(message.id, index)}
-                      isPending={isConfirmingMemory}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           ))}
           {isAiThinking && (

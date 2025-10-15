@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DocumentList } from "@/components/DocumentList";
 import { CustomerDetailsPanel } from "@/components/CustomerDetailsPanel";
-import { ChatInterface, type DetectedMemory } from "@/components/ChatInterface";
+import { ChatInterface } from "@/components/ChatInterface";
 import { ArrowLeft } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -23,9 +23,6 @@ export default function CustomerDetail() {
   const customerId = params?.id || "";
   const year = params?.year || "";
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Track detected memories for each message - keyed by message ID
-  const [messageMemories, setMessageMemories] = useState<Record<string, DetectedMemory[]>>({});
   
   // Track currently streaming message for immediate visual updates
   const [streamingMessage, setStreamingMessage] = useState<{id: string; content: string} | null>(null);
@@ -104,7 +101,6 @@ export default function CustomerDetail() {
   const messages = allMessages.map((m: any) => ({
     ...m,
     timestamp: new Date(m.createdAt || Date.now()),
-    detectedMemories: messageMemories[m.id] || [],
   }));
 
   const sendMessageMutation = useMutation({
@@ -127,8 +123,7 @@ export default function CustomerDetail() {
       let accountantMessage: any = null;
       let aiMessageId: string | null = null;
       let streamingContent = "";
-      let finalResult: any = { aiMessage: null, detectedMemories: [] };
-      let pendingMemories: any[] = []; // Store memories that arrive before first chunk
+      let finalResult: any = { aiMessage: null };
 
       // Read stream
       while (true) {
@@ -164,23 +159,6 @@ export default function CustomerDetail() {
               }
             }
 
-            if (currentEvent === "memories") {
-              // Memories detected - show immediately (before streaming completes)
-              const memories = data.detectedMemories || [];
-              if (memories.length > 0) {
-                if (aiMessageId) {
-                  // AI message exists, attach memories immediately
-                  setMessageMemories(prev => ({
-                    ...prev,
-                    [aiMessageId as string]: memories
-                  }));
-                } else {
-                  // No AI message yet, store for later
-                  pendingMemories = memories;
-                }
-              }
-            }
-
             if (currentEvent === "chunk" && data.content) {
               // Streaming chunk
               streamingContent += data.content;
@@ -188,15 +166,6 @@ export default function CustomerDetail() {
               // Create temp ID if needed
               if (!aiMessageId) {
                 aiMessageId = `ai-temp-${Date.now()}`;
-                
-                // Apply pending memories if any
-                if (pendingMemories.length > 0) {
-                  setMessageMemories(prev => ({
-                    ...prev,
-                    [aiMessageId as string]: pendingMemories
-                  }));
-                  pendingMemories = [];
-                }
               }
               
               // Update local state for immediate visual update (triggers re-render)
@@ -209,20 +178,11 @@ export default function CustomerDetail() {
             if (currentEvent === "complete") {
               // Stream complete
               const finalMessage = data.aiMessage;
-              const detectedMemories = data.detectedMemories || [];
               const requestedDocuments = data.requestedDocuments || [];
-              finalResult = { aiMessage: finalMessage, detectedMemories, requestedDocuments };
+              finalResult = { aiMessage: finalMessage, requestedDocuments };
 
               // Clear streaming message state
               setStreamingMessage(null);
-
-              // Show memories immediately
-              if (detectedMemories.length > 0 && finalMessage?.id) {
-                setMessageMemories(prev => ({
-                  ...prev,
-                  [finalMessage.id]: detectedMemories
-                }));
-              }
 
               // Auto-create requested documents
               if (requestedDocuments.length > 0) {
@@ -272,14 +232,6 @@ export default function CustomerDetail() {
       return { tempAccountantId };
     },
     onSuccess: (data: any) => {
-      // Capture detected memories
-      if (data?.detectedMemories && data?.aiMessage?.id) {
-        setMessageMemories(prev => ({
-          ...prev,
-          [data.aiMessage.id]: data.detectedMemories
-        }));
-      }
-      
       // Invalidate queries
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intakes", intakeId, "details"] });
@@ -299,41 +251,6 @@ export default function CustomerDetail() {
         description: "Your message could not be sent. Please try again.",
         variant: "destructive",
       });
-    },
-  });
-
-  const confirmMemoryMutation = useMutation({
-    mutationFn: async ({ content, type }: { content: string; type: 'firm' | 'customer' }) => {
-      // Step 1: Create the memory entity (for audit trail)
-      await apiRequest("POST", "/api/memories", {
-        type,
-        customerId: type === 'customer' ? customerId : null,
-        content,
-      });
-
-      // Step 2: Synthesize all memories into clean notes
-      const synthesisResponse = await apiRequest("POST", "/api/memories/synthesize", {
-        type,
-        customerId: type === 'customer' ? customerId : null,
-      });
-
-      return synthesisResponse.json();
-    },
-    onSuccess: (data, variables) => {
-      // Invalidate the appropriate query to refresh UI
-      if (variables.type === 'firm') {
-        queryClient.invalidateQueries({ queryKey: ["/api/firm/settings"] });
-        toast({
-          title: "Firm policy saved",
-          description: "This policy has been added to your firm settings and will be used for all customers.",
-        });
-      } else if (variables.type === 'customer') {
-        queryClient.invalidateQueries({ queryKey: ["/api/customers", customerId, "notes"] });
-        toast({
-          title: "Customer note saved",
-          description: "This information has been added to the customer's notes.",
-        });
-      }
     },
   });
 
@@ -395,50 +312,6 @@ export default function CustomerDetail() {
 
   const handleFileUpload = (files: FileList) => {
     uploadFilesMutation.mutate(files);
-  };
-
-  const handleConfirmMemory = (messageId: string, memory: DetectedMemory) => {
-    confirmMemoryMutation.mutate(
-      {
-        content: memory.content,
-        type: memory.type,
-      },
-      {
-        onSuccess: () => {
-          // Only remove the memory from UI after successful save
-          setMessageMemories(prev => {
-            const memories = prev[messageId] || [];
-            return {
-              ...prev,
-              [messageId]: memories.filter(m => m.content !== memory.content)
-            };
-          });
-          
-          toast({
-            title: "Memory saved",
-            description: "This information will be remembered for future interactions.",
-          });
-        },
-        onError: () => {
-          toast({
-            title: "Error",
-            description: "Failed to save memory. Please try again.",
-            variant: "destructive",
-          });
-        },
-      }
-    );
-  };
-
-  const handleDismissMemory = (messageId: string, memoryIndex: number) => {
-    // Remove this memory from the message's detected memories
-    setMessageMemories(prev => {
-      const memories = prev[messageId] || [];
-      return {
-        ...prev,
-        [messageId]: memories.filter((_, i) => i !== memoryIndex)
-      };
-    });
   };
 
   // Show loading while intake is being fetched
@@ -513,9 +386,6 @@ export default function CustomerDetail() {
             progressValue={progressValue}
             customerId={customerId}
             intakeYear={intake.year}
-            onConfirmMemory={handleConfirmMemory}
-            onDismissMemory={handleDismissMemory}
-            isConfirmingMemory={confirmMemoryMutation.isPending}
           />
           <div ref={messagesEndRef} />
         </div>
