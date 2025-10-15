@@ -155,11 +155,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { type, customerId } = req.body;
       
+      console.log("Synthesize request:", { type, customerId });
+      
       // Fetch memories based on type and optional customerId
       const memories = await storage.getMemories(type, customerId);
       
+      console.log(`Found ${memories.length} memories to synthesize:`, memories.map(m => ({ 
+        type: m.type, 
+        content: m.content.substring(0, 50) + "...",
+        customerId: m.customerId 
+      })));
+      
       // Synthesize memories into organized notes
       const synthesizedNotes = await synthesizeMemoriesIntoNotes(memories);
+      
+      console.log("Synthesized notes:", synthesizedNotes ? synthesizedNotes.substring(0, 100) + "..." : "Empty");
       
       // Update the appropriate notes field
       if (type === 'firm') {
